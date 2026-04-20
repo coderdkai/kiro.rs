@@ -8,6 +8,12 @@ import type {
   SetPriorityRequest,
   AddCredentialRequest,
   AddCredentialResponse,
+  DeviceFlowRegisterRequest,
+  DeviceFlowRegisterResponse,
+  DeviceFlowAuthorizeRequest,
+  DeviceFlowAuthorizeResponse,
+  DeviceFlowPollRequest,
+  DeviceFlowPollResponse,
 } from '@/types/api'
 
 // 创建 axios 实例
@@ -102,5 +108,28 @@ export async function getLoadBalancingMode(): Promise<{ mode: 'priority' | 'bala
 // 设置负载均衡模式
 export async function setLoadBalancingMode(mode: 'priority' | 'balanced'): Promise<{ mode: 'priority' | 'balanced' }> {
   const { data } = await api.put<{ mode: 'priority' | 'balanced' }>('/config/load-balancing', { mode })
+  return data
+}
+
+// ============ Device Flow ============
+
+export async function deviceFlowRegister(
+  req: DeviceFlowRegisterRequest
+): Promise<DeviceFlowRegisterResponse> {
+  const { data } = await api.post<DeviceFlowRegisterResponse>('/device-flow/register', req)
+  return data
+}
+
+export async function deviceFlowAuthorize(
+  req: DeviceFlowAuthorizeRequest
+): Promise<DeviceFlowAuthorizeResponse> {
+  const { data } = await api.post<DeviceFlowAuthorizeResponse>('/device-flow/authorize', req)
+  return data
+}
+
+export async function deviceFlowPoll(
+  req: DeviceFlowPollRequest
+): Promise<DeviceFlowPollResponse> {
+  const { data } = await api.post<DeviceFlowPollResponse>('/device-flow/poll', req)
   return data
 }

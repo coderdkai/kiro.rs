@@ -7,9 +7,10 @@ use axum::{
 
 use super::{
     handlers::{
-        add_credential, delete_credential, force_refresh_token, get_all_credentials,
-        get_credential_balance, get_load_balancing_mode, reset_failure_count,
-        set_credential_disabled, set_credential_priority, set_load_balancing_mode,
+        add_credential, delete_credential, device_flow_authorize, device_flow_poll,
+        device_flow_register, force_refresh_token, get_all_credentials, get_credential_balance,
+        get_load_balancing_mode, reset_failure_count, set_credential_disabled,
+        set_credential_priority, set_load_balancing_mode,
     },
     middleware::{AdminState, admin_auth_middleware},
 };
@@ -47,6 +48,18 @@ pub fn create_admin_router(state: AdminState) -> Router {
         .route(
             "/config/load-balancing",
             get(get_load_balancing_mode).put(set_load_balancing_mode),
+        )
+        .route(
+            "/device-flow/register",
+            post(device_flow_register),
+        )
+        .route(
+            "/device-flow/authorize",
+            post(device_flow_authorize),
+        )
+        .route(
+            "/device-flow/poll",
+            post(device_flow_poll),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),

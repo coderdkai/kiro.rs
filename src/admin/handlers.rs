@@ -9,8 +9,9 @@ use axum::{
 use super::{
     middleware::AdminState,
     types::{
-        AddCredentialRequest, SetDisabledRequest, SetLoadBalancingModeRequest, SetPriorityRequest,
-        SuccessResponse,
+        AddCredentialRequest, DeviceFlowAuthorizeRequest, DeviceFlowPollRequest,
+        DeviceFlowRegisterRequest, SetDisabledRequest, SetLoadBalancingModeRequest,
+        SetPriorityRequest, SuccessResponse,
     },
 };
 
@@ -136,6 +137,61 @@ pub async fn set_load_balancing_mode(
     Json(payload): Json<SetLoadBalancingModeRequest>,
 ) -> impl IntoResponse {
     match state.service.set_load_balancing_mode(payload) {
+        Ok(response) => Json(response).into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
+
+// ============ Device Flow ============
+
+/// POST /api/admin/device-flow/register
+/// 注册 OIDC 客户端
+pub async fn device_flow_register(
+    State(state): State<AdminState>,
+    Json(payload): Json<DeviceFlowRegisterRequest>,
+) -> impl IntoResponse {
+    match state
+        .service
+        .device_flow_register(payload.login_type, payload.enterprise_start_url)
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
+
+/// POST /api/admin/device-flow/authorize
+/// 获取设备授权码
+pub async fn device_flow_authorize(
+    State(state): State<AdminState>,
+    Json(payload): Json<DeviceFlowAuthorizeRequest>,
+) -> impl IntoResponse {
+    match state
+        .service
+        .device_flow_authorize(
+            payload.client_id,
+            payload.client_secret,
+            payload.login_type,
+            payload.enterprise_start_url,
+        )
+        .await
+    {
+        Ok(response) => Json(response).into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
+
+/// POST /api/admin/device-flow/poll
+/// 轮询 Device Flow Token
+pub async fn device_flow_poll(
+    State(state): State<AdminState>,
+    Json(payload): Json<DeviceFlowPollRequest>,
+) -> impl IntoResponse {
+    match state
+        .service
+        .device_flow_poll(payload.client_id, payload.client_secret, payload.device_code)
+        .await
+    {
         Ok(response) => Json(response).into_response(),
         Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
     }

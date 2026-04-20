@@ -33,7 +33,7 @@ struct CachedBalance {
 ///
 /// 封装所有 Admin API 的业务逻辑
 pub struct AdminService {
-    token_manager: Arc<MultiTokenManager>,
+    pub(crate) token_manager: Arc<MultiTokenManager>,
     balance_cache: Mutex<HashMap<u64, CachedBalance>>,
     cache_path: Option<PathBuf>,
     /// 已注册的端点名称集合（用于 add_credential 校验）
