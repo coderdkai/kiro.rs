@@ -100,7 +100,7 @@ export function DeviceLoginDialog({ open, onOpenChange }: DeviceLoginDialogProps
             clientSecret: authMethod === 'idc' ? cs : undefined,
           })
           toast.success('设备登录成功，凭证已自动添加')
-          queryClient.invalidateQueries({ queryKey: ['credentials'] })
+          await queryClient.refetchQueries({ queryKey: ['credentials'] })
           onOpenChange(false)
         } catch (addErr) {
           toast.error(`凭证添加失败: ${extractErrorMessage(addErr)}`)

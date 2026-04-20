@@ -6,25 +6,48 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 
 interface LoginPageProps {
-  onLogin: (apiKey: string) => void
+  onLogin: () => void
 }
 
 export function LoginPage({ onLogin }: LoginPageProps) {
   const [apiKey, setApiKey] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    // 从 storage 读取保存的 API Key
     const savedKey = storage.getApiKey()
     if (savedKey) {
       setApiKey(savedKey)
     }
   }, [])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (apiKey.trim()) {
+    if (!apiKey.trim()) return
+
+    setLoading(true)
+    setError('')
+
+    try {
+      // 使用 fetch 而非 axios 实例，避免触发 401 拦截器
+      const res = await fetch('/api/admin/credentials', {
+        headers: { 'x-api-key': apiKey.trim() },
+      })
+      if (!res.ok) {
+        if (res.status === 401) {
+          setError('API Key 无效，请检查后重试')
+        } else {
+          setError('服务器错误，请稍后重试')
+        }
+        return
+      }
+      // 验证成功，保存并登录
       storage.setApiKey(apiKey.trim())
-      onLogin(apiKey.trim())
+      onLogin()
+    } catch {
+      setError('无法连接服务器，请检查网络')
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -51,9 +74,12 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                 className="text-center"
               />
             </div>
-            <Button type="submit" className="w-full" disabled={!apiKey.trim()}>
-              登录
+            <Button type="submit" className="w-full" disabled={!apiKey.trim() || loading}>
+              {loading ? '验证中...' : '登录'}
             </Button>
+            {error && (
+              <p className="text-sm text-red-500 text-center">{error}</p>
+            )}
           </form>
         </CardContent>
       </Card>

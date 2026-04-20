@@ -17,12 +17,12 @@ struct Asset;
 /// 创建 Admin UI 路由
 pub fn create_admin_ui_router() -> Router {
     Router::new()
-        .route("/", get(index_handler))
         .route("/{*file}", get(static_handler))
+        .fallback(index_fallback)
 }
 
-/// 处理首页请求
-async fn index_handler() -> impl IntoResponse {
+/// 兜底处理：任何未匹配的路径（包括 `/`）都返回 index.html
+async fn index_fallback() -> impl IntoResponse {
     serve_index()
 }
 
