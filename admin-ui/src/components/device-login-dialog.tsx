@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { toast } from 'sonner'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Dialog,
   DialogContent,
@@ -22,6 +23,7 @@ type LoginType = 'social' | 'personal' | 'enterprise'
 type FlowStep = 'idle' | 'registering' | 'authorizing' | 'polling' | 'success' | 'error'
 
 export function DeviceLoginDialog({ open, onOpenChange }: DeviceLoginDialogProps) {
+  const queryClient = useQueryClient()
   const [loginType, setLoginType] = useState<LoginType>('social')
   const [enterpriseStartUrl, setEnterpriseStartUrl] = useState('https://d-906600eb6f.awsapps.com/start')
   const [step, setStep] = useState<FlowStep>('idle')
@@ -98,6 +100,7 @@ export function DeviceLoginDialog({ open, onOpenChange }: DeviceLoginDialogProps
             clientSecret: authMethod === 'idc' ? cs : undefined,
           })
           toast.success('设备登录成功，凭证已自动添加')
+          queryClient.invalidateQueries({ queryKey: ['credentials'] })
           onOpenChange(false)
         } catch (addErr) {
           toast.error(`凭证添加失败: ${extractErrorMessage(addErr)}`)
