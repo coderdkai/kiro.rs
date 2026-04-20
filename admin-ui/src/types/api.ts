@@ -87,3 +87,45 @@ export interface AddCredentialResponse {
   credentialId: number
   email?: string
 }
+
+// ============ Device Flow ============
+
+export interface DeviceFlowRegisterRequest {
+  loginType: 'social' | 'personal' | 'enterprise'
+  enterpriseStartUrl?: string
+}
+
+export interface DeviceFlowRegisterResponse {
+  clientId: string
+  clientSecret: string
+}
+
+export interface DeviceFlowAuthorizeRequest {
+  clientId: string
+  clientSecret: string
+  loginType: 'social' | 'personal' | 'enterprise'
+  enterpriseStartUrl?: string
+}
+
+export interface DeviceFlowAuthorizeResponse {
+  deviceCode: string
+  userCode: string
+  verificationUri: string
+  verificationUriComplete: string
+  interval: number
+  expiresIn: number
+}
+
+export interface DeviceFlowPollRequest {
+  clientId: string
+  clientSecret: string
+  deviceCode: string
+}
+
+export interface DeviceFlowPollResponse {
+  accessToken?: string
+  refreshToken?: string
+  expiresIn?: number
+  error?: string
+  errorDescription?: string
+}

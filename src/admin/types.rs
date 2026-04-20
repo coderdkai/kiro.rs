@@ -196,6 +196,70 @@ pub struct SetLoadBalancingModeRequest {
     pub mode: String,
 }
 
+// ============ Device Flow ============
+
+/// Device Flow 注册请求
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceFlowRegisterRequest {
+    /// 登录类型: social / personal / enterprise
+    #[serde(default = "default_auth_method")]
+    pub login_type: String,
+    /// 企业目录 Start URL（enterprise 类型使用）
+    pub enterprise_start_url: Option<String>,
+}
+
+/// Device Flow 注册响应
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceFlowRegisterResponse {
+    pub client_id: String,
+    pub client_secret: String,
+}
+
+/// Device Flow 授权请求
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceFlowAuthorizeRequest {
+    pub client_id: String,
+    pub client_secret: String,
+    #[serde(default = "default_auth_method")]
+    pub login_type: String,
+    pub enterprise_start_url: Option<String>,
+}
+
+/// Device Flow 授权响应
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceFlowAuthorizeResponse {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub verification_uri_complete: String,
+    pub interval: u64,
+    pub expires_in: u64,
+}
+
+/// Device Flow 轮询请求
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceFlowPollRequest {
+    pub client_id: String,
+    pub client_secret: String,
+    pub device_code: String,
+}
+
+/// Device Flow 轮询响应（透传 AWS OIDC 响应）
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceFlowPollResponse {
+    pub access_token: Option<String>,
+    pub refresh_token: Option<String>,
+    pub expires_in: Option<u64>,
+    pub error: Option<String>,
+    pub error_description: Option<String>,
+}
+
 // ============ 通用响应 ============
 
 /// 操作成功响应

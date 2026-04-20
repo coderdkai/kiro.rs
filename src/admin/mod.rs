@@ -16,6 +16,7 @@
 //! let admin_router = create_admin_router(admin_state);
 //! ```
 
+mod device_flow;
 mod error;
 mod handlers;
 mod middleware;
