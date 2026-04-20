@@ -33,6 +33,18 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// 响应拦截器：401 自动清除凭据并刷新页面
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      storage.removeApiKey()
+      window.location.reload()
+    }
+    return Promise.reject(error)
+  }
+)
+
 // 获取所有凭据状态
 export async function getCredentials(): Promise<CredentialsStatusResponse> {
   const { data } = await api.get<CredentialsStatusResponse>('/credentials')
