@@ -4,6 +4,7 @@
 //! 支持多凭据 (MultiTokenManager) 管理
 
 use anyhow::bail;
+use base64::Engine as _;
 use chrono::{DateTime, Duration, Utc};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -52,6 +53,40 @@ fn sha256_hex(input: &str) -> String {
     hasher.update(input.as_bytes());
     let result = hasher.finalize();
     format!("{:x}", result)
+}
+
+/// 从 JWT access token 中提取 email 字段
+///
+/// JWT 格式: header.payload.signature
+/// 只解码 payload 部分，不验证签名（仅用于提取展示信息）
+fn extract_email_from_jwt(token: &str) -> Option<String> {
+    let parts: Vec<&str> = token.split('.').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+
+    // Base64 URL-safe 解码 payload
+    let payload = parts[1];
+    // 补齐 base64 padding
+    let padded = {
+        let mut s = payload.to_string();
+        while s.len() % 4 != 0 {
+            s.push('=');
+        }
+        s
+    };
+
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(&padded))
+        .ok()?;
+
+    let json: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+
+    json.get("email")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
 /// 生成 API Key 脱敏展示(前 4 + ... + 后 4,长度不足或非 ASCII 回退 ***)
@@ -1635,6 +1670,25 @@ impl MultiTokenManager {
             }
         }
 
+        // 自动提取邮箱（如果凭据还没有 email）
+        {
+            let mut entries = self.entries.lock();
+            if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+                if entry.credentials.email.is_none() {
+                    if let Some(ref token) = entry.credentials.access_token {
+                        if let Some(email) = extract_email_from_jwt(token) {
+                            entry.credentials.email = Some(email.clone());
+                            tracing::info!("凭据 #{} 邮箱已自动提取: {}", id, email);
+                            drop(entries);
+                            if let Err(e) = self.persist_credentials() {
+                                tracing::warn!("邮箱更新后持久化失败（不影响本次请求）: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(usage_limits)
     }
 
@@ -1726,6 +1780,12 @@ impl MultiTokenManager {
 
         // 5. 设置 ID 并保留用户输入的元数据
         validated_cred.id = Some(new_id);
+        // 自动提取邮箱（JWT access token 中的 email claim）
+        if validated_cred.email.is_none() {
+            if let Some(ref token) = validated_cred.access_token {
+                validated_cred.email = extract_email_from_jwt(token);
+            }
+        }
         validated_cred.priority = new_cred.priority;
         validated_cred.auth_method = new_cred.auth_method.map(|m| {
             if m.eq_ignore_ascii_case("builder-id") || m.eq_ignore_ascii_case("iam") {

@@ -30,6 +30,11 @@ async fn index_handler() -> impl IntoResponse {
 async fn static_handler(uri: Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
 
+    // 空路径直接返回 index.html（处理 /admin/ 等尾斜杠场景）
+    if path.is_empty() {
+        return serve_index();
+    }
+
     // 安全检查：拒绝包含 .. 的路径
     if path.contains("..") {
         return Response::builder()
