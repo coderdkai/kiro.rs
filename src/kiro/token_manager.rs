@@ -9,6 +9,7 @@ use chrono::{DateTime, Duration, Utc};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sqlx::SqlitePool;
 use tokio::sync::Mutex as TokioMutex;
 
 use std::collections::HashMap;
@@ -561,6 +562,8 @@ pub struct MultiTokenManager {
     last_stats_save_at: Mutex<Option<Instant>>,
     /// 统计数据是否有未落盘更新
     stats_dirty: AtomicBool,
+    /// 数据库连接池（可选）
+    db_pool: Option<SqlitePool>,
 }
 
 /// 每个凭据最大 API 调用失败次数
@@ -591,12 +594,14 @@ impl MultiTokenManager {
     /// * `proxy` - 可选的代理配置
     /// * `credentials_path` - 凭据文件路径（用于回写）
     /// * `is_multiple_format` - 是否为多凭据格式（数组格式才回写）
+    /// * `db_pool` - 数据库连接池（可选）
     pub fn new(
         config: Config,
         credentials: Vec<KiroCredentials>,
         proxy: Option<ProxyConfig>,
         credentials_path: Option<PathBuf>,
         is_multiple_format: bool,
+        db_pool: Option<SqlitePool>,
     ) -> anyhow::Result<Self> {
         // 计算当前最大 ID，为没有 ID 的凭据分配新 ID
         let max_existing_id = credentials.iter().filter_map(|c| c.id).max().unwrap_or(0);
@@ -690,6 +695,7 @@ impl MultiTokenManager {
             load_balancing_mode: Mutex::new(load_balancing_mode),
             last_stats_save_at: Mutex::new(None),
             stats_dirty: AtomicBool::new(false),
+            db_pool,
         };
 
         // 如果有新分配的 ID 或新生成的 machineId，立即持久化到配置文件
