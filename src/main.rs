@@ -51,7 +51,7 @@ async fn main() {
 
         // 运行迁移
         kiro::database::run_migrations(&pool).await.unwrap_or_else(|e| {
-            tracing::error!("运行数据库迁移失败: {}", e);
+            tracing::error!("运行数据库迁移失败: {:#}", e);
             std::process::exit(1);
         });
 
