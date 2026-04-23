@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { RefreshCw, LogOut, Moon, Sun, Server, Trash2, RotateCcw, CheckCircle2, LogIn } from 'lucide-react'
+import { RefreshCw, LogOut, Moon, Sun, Server, Trash2, RotateCcw, CheckCircle2, LogIn, UserPlus } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { storage } from '@/lib/storage'
@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { CredentialCard } from '@/components/credential-card'
 import { BalanceDialog } from '@/components/balance-dialog'
 import { DeviceLoginDialog } from '@/components/device-login-dialog'
+import { AutoRegisterDialog } from '@/components/auto-register-dialog'
 import { BatchVerifyDialog, type VerifyResult } from '@/components/batch-verify-dialog'
 import { useCredentials, useDeleteCredential, useResetFailure, useLoadBalancingMode, useSetLoadBalancingMode } from '@/hooks/use-credentials'
 import { getCredentialBalance, forceRefreshToken } from '@/api/credentials'
@@ -23,6 +24,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [selectedCredentialId, setSelectedCredentialId] = useState<number | null>(null)
   const [balanceDialogOpen, setBalanceDialogOpen] = useState(false)
   const [deviceLoginDialogOpen, setDeviceLoginDialogOpen] = useState(false)
+  const [autoRegisterDialogOpen, setAutoRegisterDialogOpen] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [verifyDialogOpen, setVerifyDialogOpen] = useState(false)
   const [verifying, setVerifying] = useState(false)
@@ -718,6 +720,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
                   清除已禁用
                 </Button>
               )}
+              <Button onClick={() => setAutoRegisterDialogOpen(true)} size="sm" variant="outline">
+                <UserPlus className="h-4 w-4 mr-2" />
+                自动注册
+              </Button>
               <Button onClick={() => setDeviceLoginDialogOpen(true)} size="sm">
                 <LogIn className="h-4 w-4 mr-2" />
                 设备登录
@@ -780,6 +786,12 @@ export function Dashboard({ onLogout }: DashboardProps) {
         credentialId={selectedCredentialId}
         open={balanceDialogOpen}
         onOpenChange={setBalanceDialogOpen}
+      />
+
+      {/* 自动注册对话框 */}
+      <AutoRegisterDialog
+        open={autoRegisterDialogOpen}
+        onOpenChange={setAutoRegisterDialogOpen}
       />
 
       {/* 设备登录对话框 */}
