@@ -142,6 +142,40 @@ pub async fn set_load_balancing_mode(
     }
 }
 
+// ============ Auto Register ============
+
+/// GET /api/admin/auto-register (SSE)
+pub async fn auto_register(State(state): State<AdminState>) -> impl IntoResponse {
+    let config = state.service.token_manager.config();
+    let reg_config = config.register.clone();
+
+    // 校验必要配置
+    if reg_config.imap_email.is_none() || reg_config.imap_password.is_none() {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(super::types::AdminErrorResponse::invalid_request(
+                "缺少 IMAP 配置 (register.imapEmail, register.imapPassword)",
+            )),
+        ));
+    }
+    if reg_config.icloud_dsid.is_none()
+        || reg_config.icloud_partition.is_none()
+        || reg_config.icloud_cookies.is_none()
+    {
+        return Err((
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(super::types::AdminErrorResponse::invalid_request(
+                "缺少 iCloud HME 配置 (register.icloudDsid, register.icloudPartition, register.icloudCookies)",
+            )),
+        ));
+    }
+
+    Ok(super::auto_register::create_register_stream(
+        state.service.clone(),
+        reg_config,
+    ))
+}
+
 // ============ Device Flow ============
 
 /// POST /api/admin/device-flow/register

@@ -113,9 +113,52 @@ pub struct Config {
     #[serde(default)]
     pub database: DatabaseConfig,
 
+    /// 自动注册配置
+    #[serde(default)]
+    pub register: RegisterConfig,
+
     /// 配置文件路径（运行时元数据，不写入 JSON）
     #[serde(skip)]
     config_path: Option<PathBuf>,
+}
+
+/// 自动注册配置（用于调用 Python 注册脚本）
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RegisterConfig {
+    /// IMAP 服务器地址
+    #[serde(default)]
+    pub imap_host: Option<String>,
+    /// IMAP 端口
+    #[serde(default)]
+    pub imap_port: Option<u16>,
+    /// IMAP 邮箱（验证码接收邮箱）
+    #[serde(default)]
+    pub imap_email: Option<String>,
+    /// IMAP 密码（应用专用密码）
+    #[serde(default)]
+    pub imap_password: Option<String>,
+    /// iCloud DSID
+    #[serde(default)]
+    pub icloud_dsid: Option<String>,
+    /// iCloud Partition
+    #[serde(default)]
+    pub icloud_partition: Option<String>,
+    /// iCloud Cookies（Hide My Email API 所需）
+    #[serde(default)]
+    pub icloud_cookies: Option<String>,
+    /// HME 标签（默认 "kiro"）
+    #[serde(default)]
+    pub hme_label: Option<String>,
+    /// 注册用代理
+    #[serde(default)]
+    pub proxy: Option<String>,
+    /// 注册账号密码（不设置则随机生成）
+    #[serde(default)]
+    pub password: Option<String>,
+    /// Python 注册脚本路径（默认 /app/scripts/kiro_register.py）
+    #[serde(default)]
+    pub script_path: Option<String>,
 }
 
 /// 数据库配置
@@ -224,6 +267,7 @@ impl Default for Config {
             default_endpoint: default_endpoint(),
             endpoints: HashMap::new(),
             database: DatabaseConfig::default(),
+            register: RegisterConfig::default(),
             config_path: None,
         }
     }

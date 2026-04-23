@@ -20,10 +20,13 @@ RUN cargo build --release
 
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates python3 py3-pip && \
+    pip3 install --no-cache-dir --break-system-packages \
+        curl_cffi cbor2 jwcrypto python-dotenv
 
 WORKDIR /app
 COPY --from=builder /app/target/release/kiro-rs /app/kiro-rs
+COPY scripts/kiro_register.py /app/scripts/kiro_register.py
 
 VOLUME ["/app/config"]
 

@@ -4,7 +4,6 @@
 //! 支持多凭据 (MultiTokenManager) 管理
 
 use anyhow::bail;
-use base64::Engine as _;
 use chrono::{DateTime, Duration, Utc};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
