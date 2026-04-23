@@ -22,10 +22,14 @@ CREATE TABLE IF NOT EXISTS credentials (
     kiro_api_key TEXT,
     endpoint TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(refresh_token) WHERE refresh_token IS NOT NULL,
-    UNIQUE(kiro_api_key) WHERE kiro_api_key IS NOT NULL
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- 部分唯一索引（仅约束非 NULL 值）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_credentials_refresh_token
+    ON credentials(refresh_token) WHERE refresh_token IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_credentials_kiro_api_key
+    ON credentials(kiro_api_key) WHERE kiro_api_key IS NOT NULL;
 
 -- 统计表
 CREATE TABLE IF NOT EXISTS credential_stats (
