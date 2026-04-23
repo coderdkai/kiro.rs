@@ -58,3 +58,22 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
+
+/* 小屏幕优化 */
+@media (max-width: 640px) {
+  .container {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  /* 减小小屏幕字体 */
+  body {
+    font-size: 0.875rem;
+  }
+
+  /* 对话框适配 */
+  [role="dialog"] {
+    max-width: 95vw !important;
+    max-height: 90vh !important;
+  }
+}

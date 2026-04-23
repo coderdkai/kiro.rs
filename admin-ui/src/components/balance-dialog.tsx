@@ -28,7 +28,7 @@ export function BalanceDialog({ credentialId, open, onOpenChange }: BalanceDialo
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-w-md sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             凭据 #{credentialId} 余额信息

@@ -37,12 +37,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const cancelVerifyRef = useRef(false)
   const [currentPage, setCurrentPage] = useState(1)
   const itemsPerPage = 12
-  const [darkMode, setDarkMode] = useState(() => {
-    if (typeof window !== 'undefined') {
-      return document.documentElement.classList.contains('dark')
-    }
-    return false
-  })
+  const [darkMode, setDarkMode] = useState(() => storage.getDarkMode())
 
   const queryClient = useQueryClient()
   const { data, isLoading, error, refetch } = useCredentials()
@@ -66,6 +61,28 @@ export function Dashboard({ onLogout }: DashboardProps) {
   useEffect(() => {
     setCurrentPage(1)
   }, [data?.credentials.length])
+
+  // 应用暗色模式
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode)
+  }, [darkMode])
+
+  // 从 localStorage 加载余额缓存
+  useEffect(() => {
+    if (!data?.credentials) return
+
+    const cachedBalances = new Map<number, BalanceResponse>()
+    data.credentials.forEach(credential => {
+      const cached = storage.getBalanceCache(credential.id)
+      if (cached) {
+        cachedBalances.set(credential.id, cached)
+      }
+    })
+
+    if (cachedBalances.size > 0) {
+      setBalanceMap(cachedBalances)
+    }
+  }, [data?.credentials])
 
   // 只保留当前仍存在的凭据缓存，避免删除后残留旧数据
   useEffect(() => {
@@ -102,8 +119,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
   }, [data?.credentials])
 
   const toggleDarkMode = () => {
-    setDarkMode(!darkMode)
-    document.documentElement.classList.toggle('dark')
+    const newMode = !darkMode
+    setDarkMode(newMode)
+    storage.setDarkMode(newMode)
+    document.documentElement.classList.toggle('dark', newMode)
   }
 
   const handleViewBalance = (id: number) => {
@@ -357,9 +376,24 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
     let successCount = 0
     let failCount = 0
+    let cacheHitCount = 0
 
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i]
+
+      // 先尝试从 localStorage 读取缓存
+      const cached = storage.getBalanceCache(id)
+      if (cached) {
+        cacheHitCount++
+        successCount++
+        setBalanceMap(prev => {
+          const next = new Map(prev)
+          next.set(id, cached)
+          return next
+        })
+        setQueryInfoProgress({ current: i + 1, total: ids.length })
+        continue
+      }
 
       setLoadingBalanceIds(prev => {
         const next = new Set(prev)
@@ -371,6 +405,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
         const balance = await getCredentialBalance(id)
         successCount++
 
+        // 保存到 localStorage 和内存
+        storage.setBalanceCache(id, balance)
         setBalanceMap(prev => {
           const next = new Map(prev)
           next.set(id, balance)
@@ -391,10 +427,11 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
     setQueryingInfo(false)
 
+    const cacheInfo = cacheHitCount > 0 ? `（${cacheHitCount} 个来自缓存）` : ''
     if (failCount === 0) {
-      toast.success(`查询完成：成功 ${successCount}/${ids.length}`)
+      toast.success(`查询完成：成功 ${successCount}/${ids.length}${cacheInfo}`)
     } else {
-      toast.warning(`查询完成：成功 ${successCount} 个，失败 ${failCount} 个`)
+      toast.warning(`查询完成：成功 ${successCount} 个，失败 ${failCount} 个${cacheInfo}`)
     }
   }
 
@@ -441,6 +478,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
       try {
         const balance = await getCredentialBalance(id)
         successCount++
+
+        // 保存到 localStorage 和内存
+        storage.setBalanceCache(id, balance)
 
         // 更新为成功状态
         setVerifyResults(prev => {
@@ -566,7 +606,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       {/* 主内容 */}
       <main className="container mx-auto px-4 md:px-8 py-6">
         {/* 统计卡片 */}
-        <div className="grid gap-4 md:grid-cols-3 mb-6">
+        <div className="grid gap-4 grid-cols-1 sm:grid-cols-3 mb-6">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -604,7 +644,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
         {/* 凭据列表 */}
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex items-center gap-4">
               <h2 className="text-xl font-semibold">凭据管理</h2>
               {selectedIds.size > 0 && (
@@ -616,7 +656,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 </div>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {selectedIds.size > 0 && (
                 <>
                   <Button onClick={handleBatchVerify} size="sm" variant="outline">
@@ -692,7 +732,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
             </Card>
           ) : (
             <>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                 {currentCredentials.map((credential) => (
                   <CredentialCard
                     key={credential.id}
