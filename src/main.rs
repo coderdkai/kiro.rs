@@ -40,10 +40,49 @@ async fn main() {
         std::process::exit(1);
     });
 
+    // 初始化数据库（如果启用）
+    let db_pool = if config.database.enabled {
+        tracing::info!("数据库已启用，初始化连接池");
+        let db_path = std::path::Path::new(&config.database.path);
+        let pool = kiro::database::init_pool(db_path).await.unwrap_or_else(|e| {
+            tracing::error!("初始化数据库失败: {}", e);
+            std::process::exit(1);
+        });
+
+        // 运行迁移
+        kiro::database::run_migrations(&pool).await.unwrap_or_else(|e| {
+            tracing::error!("运行数据库迁移失败: {}", e);
+            std::process::exit(1);
+        });
+
+        Some(pool)
+    } else {
+        tracing::info!("数据库未启用，使用 JSON 文件存储");
+        None
+    };
+
     // 加载凭证（支持单对象或数组格式）
     let credentials_path = args
         .credentials
         .unwrap_or_else(|| KiroCredentials::default_credentials_path().to_string());
+
+    // 如果启用数据库，检查是否需要从 JSON 迁移
+    if let Some(ref pool) = db_pool {
+        let json_path = std::path::Path::new(&credentials_path);
+        if kiro::database::migration::needs_migration(pool, json_path).await.unwrap_or(false) {
+            tracing::info!("检测到需要从 JSON 迁移数据");
+            match kiro::database::migration::migrate_from_json(json_path, pool).await {
+                Ok(count) => {
+                    tracing::info!("成功迁移 {} 个凭据到数据库", count);
+                }
+                Err(e) => {
+                    tracing::error!("迁移失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+
     let credentials_config = CredentialsConfig::load(&credentials_path).unwrap_or_else(|e| {
         tracing::error!("加载凭证失败: {}", e);
         std::process::exit(1);
@@ -135,6 +174,7 @@ async fn main() {
         proxy_config.clone(),
         Some(credentials_path.into()),
         is_multiple_format,
+        db_pool.clone(),
     )
     .unwrap_or_else(|e| {
         tracing::error!("创建 Token 管理器失败: {}", e);
@@ -178,7 +218,7 @@ async fn main() {
             anthropic_app
         } else {
             let admin_service =
-                admin::AdminService::new(token_manager.clone(), endpoint_names.clone());
+                admin::AdminService::new(token_manager.clone(), endpoint_names.clone(), db_pool.clone());
             let admin_state = admin::AdminState::new(admin_key, admin_service);
             let admin_app = admin::create_admin_router(admin_state);
 
