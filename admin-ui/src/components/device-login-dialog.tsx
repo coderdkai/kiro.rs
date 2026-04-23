@@ -26,6 +26,7 @@ export function DeviceLoginDialog({ open, onOpenChange }: DeviceLoginDialogProps
   const queryClient = useQueryClient()
   const [loginType, setLoginType] = useState<LoginType>('social')
   const [enterpriseStartUrl, setEnterpriseStartUrl] = useState('https://d-906600eb6f.awsapps.com/start')
+  const [email, setEmail] = useState('')
   const [step, setStep] = useState<FlowStep>('idle')
   const [errorMessage, setErrorMessage] = useState('')
   const [authResponse, setAuthResponse] = useState<DeviceFlowAuthorizeResponse | null>(null)
@@ -39,9 +40,11 @@ export function DeviceLoginDialog({ open, onOpenChange }: DeviceLoginDialogProps
   const clientSecretRef = useRef('')
   const deviceCodeRef = useRef('')
   const loginTypeRef = useRef<LoginType>('social')
+  const emailRef = useRef('')
 
   // 保持 ref 和 state 同步
   useEffect(() => { loginTypeRef.current = loginType }, [loginType])
+  useEffect(() => { emailRef.current = email }, [email])
 
   const resetState = useCallback(() => {
     if (pollTimerRef.current) {
@@ -56,7 +59,9 @@ export function DeviceLoginDialog({ open, onOpenChange }: DeviceLoginDialogProps
     clientIdRef.current = ''
     clientSecretRef.current = ''
     deviceCodeRef.current = ''
+    emailRef.current = ''
     pollIntervalRef.current = 2000
+    setEmail('')
   }, [])
 
   useEffect(() => {
@@ -98,6 +103,7 @@ export function DeviceLoginDialog({ open, onOpenChange }: DeviceLoginDialogProps
             authMethod,
             clientId: authMethod === 'idc' ? cid : undefined,
             clientSecret: authMethod === 'idc' ? cs : undefined,
+            email: emailRef.current || undefined,
           })
           toast.success('设备登录成功，凭证已自动添加')
           await queryClient.refetchQueries({ queryKey: ['credentials'] })
@@ -238,6 +244,17 @@ export function DeviceLoginDialog({ open, onOpenChange }: DeviceLoginDialogProps
                 </Button>
               ))}
             </div>
+          </div>
+
+          {/* Email（可选，用于凭证标识） */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Email（可选）</label>
+            <Input
+              placeholder="用于标识凭证的邮箱地址"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={isBusy}
+            />
           </div>
 
           {/* Enterprise URL */}

@@ -38,8 +38,6 @@ pub struct IdcRefreshResponse {
     #[serde(default)]
     pub refresh_token: Option<String>,
     #[serde(default)]
-    pub id_token: Option<String>,
-    #[serde(default)]
     pub expires_in: Option<i64>,
     #[serde(default)]
     pub profile_arn: Option<String>,
