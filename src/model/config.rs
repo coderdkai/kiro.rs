@@ -109,9 +109,48 @@ pub struct Config {
     #[serde(default)]
     pub endpoints: HashMap<String, serde_json::Value>,
 
+    /// 数据库配置
+    #[serde(default)]
+    pub database: DatabaseConfig,
+
     /// 配置文件路径（运行时元数据，不写入 JSON）
     #[serde(skip)]
     config_path: Option<PathBuf>,
+}
+
+/// 数据库配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseConfig {
+    /// 是否启用数据库（默认 true）
+    #[serde(default = "default_database_enabled")]
+    pub enabled: bool,
+
+    /// 数据库文件路径（默认 "config/credentials.db"）
+    #[serde(default = "default_database_path")]
+    pub path: String,
+
+    /// 是否启用双写模式（同时写入数据库和 JSON，默认 false）
+    #[serde(default)]
+    pub dual_write: bool,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_database_enabled(),
+            path: default_database_path(),
+            dual_write: false,
+        }
+    }
+}
+
+fn default_database_enabled() -> bool {
+    true
+}
+
+fn default_database_path() -> String {
+    "config/credentials.db".to_string()
 }
 
 fn default_host() -> String {
@@ -184,6 +223,7 @@ impl Default for Config {
             extract_thinking: default_extract_thinking(),
             default_endpoint: default_endpoint(),
             endpoints: HashMap::new(),
+            database: DatabaseConfig::default(),
             config_path: None,
         }
     }
