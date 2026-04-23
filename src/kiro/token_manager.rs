@@ -352,6 +352,16 @@ async fn refresh_idc_token(
         new_credentials.profile_arn = Some(profile_arn);
     }
 
+    // 从 id_token (JWT) 提取邮箱（access_token 是 opaque token，无法解析）
+    if new_credentials.email.is_none() {
+        if let Some(ref id_token) = data.id_token {
+            if let Some(email) = extract_email_from_jwt(id_token) {
+                tracing::info!("从 IdC id_token 提取到邮箱: {}", email);
+                new_credentials.email = Some(email);
+            }
+        }
+    }
+
     Ok(new_credentials)
 }
 
