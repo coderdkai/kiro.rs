@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
+import { Copy, Check } from 'lucide-react'
 import {
   Dialog,
   DialogContent,
@@ -149,6 +150,16 @@ export function AutoRegisterDialog({ open, onOpenChange }: AutoRegisterDialogPro
     onOpenChange(false)
   }, [onOpenChange])
 
+  const [copied, setCopied] = useState(false)
+  const copyLogs = useCallback(() => {
+    const text = logs.join('\n')
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      toast.success('日志已复制到剪贴板')
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }, [logs])
+
   const handleOpenChange = useCallback((newOpen: boolean) => {
     if (!newOpen) {
       handleClose()
@@ -177,13 +188,25 @@ export function AutoRegisterDialog({ open, onOpenChange }: AutoRegisterDialogPro
           )}
 
           {(step === 'running' || step === 'success' || step === 'error') && (
-            <div className="bg-muted/50 rounded-lg p-3 h-[400px] overflow-y-auto font-mono text-xs leading-relaxed">
-              {logs.map((line, i) => (
-                <div key={i} className="whitespace-pre-wrap break-all">
-                  {line}
-                </div>
-              ))}
-              <div ref={logEndRef} />
+            <div className="relative">
+              {logs.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="absolute top-1 right-1 z-10 h-7 w-7 opacity-60 hover:opacity-100"
+                  onClick={copyLogs}
+                >
+                  {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                </Button>
+              )}
+              <div className="bg-muted/50 rounded-lg p-3 h-[400px] overflow-y-auto font-mono text-xs leading-relaxed">
+                {logs.map((line, i) => (
+                  <div key={i} className="whitespace-pre-wrap break-all">
+                    {line}
+                  </div>
+                ))}
+                <div ref={logEndRef} />
+              </div>
             </div>
           )}
 
