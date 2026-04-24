@@ -6,7 +6,7 @@ import { storage } from '@/lib/storage'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { CredentialCard } from '@/components/credential-card'
+import { CredentialTable } from '@/components/credential-table'
 import { BalanceDialog } from '@/components/balance-dialog'
 import { DeviceLoginDialog } from '@/components/device-login-dialog'
 import { AutoRegisterDialog } from '@/components/auto-register-dialog'
@@ -38,7 +38,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [batchRefreshProgress, setBatchRefreshProgress] = useState({ current: 0, total: 0 })
   const cancelVerifyRef = useRef(false)
   const [currentPage, setCurrentPage] = useState(1)
-  const itemsPerPage = 12
+  const itemsPerPage = 50
   const [darkMode, setDarkMode] = useState(() => storage.getDarkMode())
 
   const queryClient = useQueryClient()
@@ -156,6 +156,20 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   const deselectAll = () => {
     setSelectedIds(new Set())
+  }
+
+  const handleSelectAllCurrentPage = () => {
+    const currentIds = currentCredentials.map(c => c.id)
+    const allSelected = currentIds.every(id => selectedIds.has(id))
+    if (allSelected) {
+      const newSelected = new Set(selectedIds)
+      currentIds.forEach(id => newSelected.delete(id))
+      setSelectedIds(newSelected)
+    } else {
+      const newSelected = new Set(selectedIds)
+      currentIds.forEach(id => newSelected.add(id))
+      setSelectedIds(newSelected)
+    }
   }
 
   // 批量删除（仅删除已禁用项）
@@ -730,53 +744,39 @@ export function Dashboard({ onLogout }: DashboardProps) {
               </Button>
             </div>
           </div>
-          {data?.credentials.length === 0 ? (
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">
-                暂无凭据
-              </CardContent>
-            </Card>
-          ) : (
-            <>
-              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-                {currentCredentials.map((credential) => (
-                  <CredentialCard
-                    key={credential.id}
-                    credential={credential}
-                    onViewBalance={handleViewBalance}
-                    selected={selectedIds.has(credential.id)}
-                    onToggleSelect={() => toggleSelect(credential.id)}
-                    balance={balanceMap.get(credential.id) || null}
-                    loadingBalance={loadingBalanceIds.has(credential.id)}
-                  />
-                ))}
-              </div>
+          <CredentialTable
+            credentials={currentCredentials}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleSelect}
+            onSelectAll={handleSelectAllCurrentPage}
+            onViewBalance={handleViewBalance}
+            balanceMap={balanceMap}
+            loadingBalanceIds={loadingBalanceIds}
+          />
 
-              {/* 分页控件 */}
-              {totalPages > 1 && (
-                <div className="flex justify-center items-center gap-4 mt-6">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    上一页
-                  </Button>
-                  <span className="text-sm text-muted-foreground">
-                    第 {currentPage} / {totalPages} 页（共 {data?.credentials.length} 个凭据）
-                  </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                    disabled={currentPage === totalPages}
-                  >
-                    下一页
-                  </Button>
-                </div>
-              )}
-            </>
+          {/* 分页控件 */}
+          {totalPages > 1 && (
+            <div className="flex justify-center items-center gap-4 mt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+              >
+                上一页
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                第 {currentPage} / {totalPages} 页（共 {data?.credentials.length} 个凭据）
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+              >
+                下一页
+              </Button>
+            </div>
           )}
         </div>
       </main>
