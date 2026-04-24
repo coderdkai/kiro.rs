@@ -237,7 +237,28 @@ impl KiroProvider {
                 continue;
             }
 
-            // 瞬态错误
+            // 429 风控封禁（suspicious activity）：账号级限制，计入凭据失败以触发禁用和切换
+            if Self::is_suspicious_activity_429(status.as_u16(), &body) {
+                tracing::error!(
+                    "MCP 请求失败（账号风控封禁，尝试 {}/{}）: {} {}",
+                    attempt + 1,
+                    max_retries,
+                    status,
+                    body
+                );
+                let has_available = self.token_manager.report_failure(ctx.id);
+                if !has_available {
+                    anyhow::bail!(
+                        "MCP 请求失败（所有凭据已被风控封禁）: {} {}",
+                        status,
+                        body
+                    );
+                }
+                last_error = Some(anyhow::anyhow!("MCP 请求失败: {} {}", status, body));
+                continue;
+            }
+
+            // 普通瞬态错误（限流 429 / 408 / 5xx）
             if matches!(status.as_u16(), 408 | 429) || status.is_server_error() {
                 tracing::warn!(
                     "MCP 请求失败（上游瞬态错误，尝试 {}/{}）: {} {}",
@@ -434,8 +455,35 @@ impl KiroProvider {
                 continue;
             }
 
-            // 429/408/5xx - 瞬态上游错误：重试但不禁用或切换凭据
-            // （避免 429 high traffic / 502 high load 等瞬态错误把所有凭据锁死）
+            // 429 风控封禁（suspicious activity）：账号级限制，计入凭据失败以触发禁用和切换
+            if Self::is_suspicious_activity_429(status.as_u16(), &body) {
+                tracing::error!(
+                    "API 请求失败（账号风控封禁，尝试 {}/{}）: {} {}",
+                    attempt + 1,
+                    max_retries,
+                    status,
+                    body
+                );
+                let has_available = self.token_manager.report_failure(ctx.id);
+                if !has_available {
+                    anyhow::bail!(
+                        "{} API 请求失败（所有凭据已被风控封禁）: {} {}",
+                        api_type,
+                        status,
+                        body
+                    );
+                }
+                last_error = Some(anyhow::anyhow!(
+                    "{} API 请求失败: {} {}",
+                    api_type,
+                    status,
+                    body
+                ));
+                continue;
+            }
+
+            // 429/408/5xx - 普通瞬态上游错误：延迟重试但不禁用或切换凭据
+            // （避免普通限流 / 502 high load 等瞬态错误把所有凭据锁死）
             if matches!(status.as_u16(), 408 | 429) || status.is_server_error() {
                 tracing::warn!(
                     "API 请求失败（上游瞬态错误，尝试 {}/{}）: {} {}",
@@ -504,6 +552,14 @@ impl KiroProvider {
             .get("modelId")?
             .as_str()
             .map(|s| s.to_string())
+    }
+
+    /// 判断 429 响应是否为账号级风控封禁（suspicious activity）
+    ///
+    /// 区别于普通限流 429，风控封禁意味着该账号已被上游标记，重试无意义，
+    /// 应计入凭据失败次数以触发自动禁用和切换。
+    fn is_suspicious_activity_429(status: u16, body: &str) -> bool {
+        status == 429 && body.contains("suspicious activity")
     }
 
     fn retry_delay(attempt: usize) -> Duration {
