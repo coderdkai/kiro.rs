@@ -1,21 +1,31 @@
 FROM node:22-alpine AS frontend-builder
 
 WORKDIR /app/admin-ui
-COPY admin-ui/package.json ./
-RUN npm install -g pnpm && pnpm install
+COPY admin-ui/package.json admin-ui/pnpm-lock.yaml ./
+RUN npm install -g pnpm && pnpm install --frozen-lockfile
 COPY admin-ui ./
 RUN pnpm build
 
-FROM rust:1.92-alpine AS builder
-
-RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static
-
+FROM rust:1.92-alpine AS chef
+RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static && \
+    cargo install cargo-chef --locked
 WORKDIR /app
-COPY Cargo.toml Cargo.lock* ./
+
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY migrations ./migrations
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+ENV CARGO_PROFILE_RELEASE_LTO=off
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migrations ./migrations
 COPY --from=frontend-builder /app/admin-ui/dist /app/admin-ui/dist
-
 RUN cargo build --release
 
 FROM alpine:3.21
