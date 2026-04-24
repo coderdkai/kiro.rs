@@ -61,7 +61,7 @@ async fn main() {
         None
     };
 
-    // 加载凭证（支持单对象或数组格式）
+    // 加载凭证（支持 SQLite 或 JSON 存储）
     let credentials_path = args
         .credentials
         .unwrap_or_else(|| KiroCredentials::default_credentials_path().to_string());
@@ -83,16 +83,27 @@ async fn main() {
         }
     }
 
-    let credentials_config = CredentialsConfig::load(&credentials_path).unwrap_or_else(|e| {
-        tracing::error!("加载凭证失败: {}", e);
-        std::process::exit(1);
-    });
+    let (credentials_list, is_multiple_format) = if let Some(ref pool) = db_pool {
+        let credentials = kiro::database::credentials::get_all(pool).await.unwrap_or_else(|e| {
+            tracing::error!("从数据库加载凭证失败: {}", e);
+            std::process::exit(1);
+        });
+        (credentials, true)
+    } else {
+        let credentials_config = CredentialsConfig::load(&credentials_path).unwrap_or_else(|e| {
+            tracing::error!("加载凭证失败: {}", e);
+            std::process::exit(1);
+        });
 
-    // 判断是否为多凭据格式（用于刷新后回写）
-    let is_multiple_format = credentials_config.is_multiple();
+        // 判断是否为多凭据格式（用于刷新后回写）
+        let is_multiple_format = credentials_config.is_multiple();
 
-    // 转换为按优先级排序的凭据列表
-    let mut credentials_list = credentials_config.into_sorted_credentials();
+        // 转换为按优先级排序的凭据列表
+        let credentials_list = credentials_config.into_sorted_credentials();
+        (credentials_list, is_multiple_format)
+    };
+
+    let mut credentials_list = credentials_list;
 
     // 检查 KIRO_API_KEY 环境变量，自动创建 API Key 凭据
     if let Ok(kiro_api_key) = std::env::var("KIRO_API_KEY") {

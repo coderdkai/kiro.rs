@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration as StdDuration, Instant};
 
 use crate::http_client::{ProxyConfig, build_client};
+use crate::kiro::database;
 use crate::kiro::machine_id;
 use crate::kiro::model::credentials::KiroCredentials;
 use crate::kiro::model::token_refresh::{
@@ -974,20 +975,57 @@ impl MultiTokenManager {
         })
     }
 
-    /// 将凭据列表回写到源文件
+    /// 持久化所有凭据到 SQLite。
+    async fn persist_credentials_to_db(&self, pool: &SqlitePool) -> anyhow::Result<()> {
+        let credentials: Vec<(u64, KiroCredentials)> = {
+            let entries = self.entries.lock();
+            entries
+                .iter()
+                .map(|e| {
+                    let mut cred = e.credentials.clone();
+                    cred.canonicalize_auth_method();
+                    cred.disabled = e.disabled;
+                    (e.id, cred)
+                })
+                .collect()
+        };
+
+        for (id, cred) in credentials {
+            database::credentials::update(pool, id, &cred).await?;
+        }
+
+        Ok(())
+    }
+
+    /// 将凭据列表回写到源存储
     ///
-    /// 仅在以下条件满足时回写：
-    /// - 源文件是多凭据格式（数组）
-    /// - credentials_path 已设置
+    /// SQLite 启用时写入数据库；否则仅多凭据 JSON 格式才回写。
     ///
     /// # Returns
-    /// - `Ok(true)` - 成功写入文件
+    /// - `Ok(true)` - 成功写入存储
     /// - `Ok(false)` - 跳过写入（非多凭据格式或无路径配置）
     /// - `Err(_)` - 写入失败
     fn persist_credentials(&self) -> anyhow::Result<bool> {
         use anyhow::Context;
 
-        // 仅多凭据格式才回写
+        // SQLite 模式直接回写数据库
+        if let Some(pool) = &self.db_pool {
+            let pool = pool.clone();
+            if tokio::runtime::Handle::try_current().is_ok() {
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(async { self.persist_credentials_to_db(&pool).await })
+                })?;
+            } else {
+                let runtime = tokio::runtime::Runtime::new()?;
+                runtime.block_on(async { self.persist_credentials_to_db(&pool).await })?;
+            }
+
+            tracing::debug!("已回写凭据到 SQLite");
+            return Ok(true);
+        }
+
+        // 仅多凭据格式才回写 JSON
         if !self.is_multiple_format {
             return Ok(false);
         }
@@ -1644,6 +1682,15 @@ impl MultiTokenManager {
         Ok(usage_limits)
     }
 
+    pub async fn flush_credentials(&self) -> anyhow::Result<bool> {
+        if let Some(pool) = &self.db_pool {
+            self.persist_credentials_to_db(pool).await?;
+            return Ok(true);
+        }
+
+        self.persist_credentials()
+    }
+
     /// 添加新凭据（Admin API）
     ///
     /// # 流程
@@ -1752,6 +1799,32 @@ impl MultiTokenManager {
         validated_cred.proxy_password = new_cred.proxy_password;
         validated_cred.kiro_api_key = new_cred.kiro_api_key;
 
+        // 6. SQLite 模式先落库，再加入内存
+        if let Some(pool) = &self.db_pool {
+            let mut db_cred = validated_cred.clone();
+            db_cred.id = None;
+            let inserted_id = database::credentials::insert(pool, &db_cred).await?;
+            validated_cred.id = Some(inserted_id);
+            database::stats::init(pool, inserted_id).await?;
+
+            {
+                let mut entries = self.entries.lock();
+                entries.push(CredentialEntry {
+                    id: inserted_id,
+                    credentials: validated_cred,
+                    failure_count: 0,
+                    refresh_failure_count: 0,
+                    disabled: false,
+                    disabled_reason: None,
+                    success_count: 0,
+                    last_used_at: None,
+                });
+            }
+
+            tracing::info!("成功添加凭据 #{}", inserted_id);
+            return Ok(inserted_id);
+        }
+
         {
             let mut entries = self.entries.lock();
             entries.push(CredentialEntry {
@@ -1766,7 +1839,7 @@ impl MultiTokenManager {
             });
         }
 
-        // 6. 持久化
+        // 7. 持久化 JSON
         self.persist_credentials()?;
 
         tracing::info!("成功添加凭据 #{}", new_id);
@@ -1830,7 +1903,21 @@ impl MultiTokenManager {
         }
 
         // 持久化更改
-        self.persist_credentials()?;
+        if let Some(pool) = &self.db_pool {
+            let pool = pool.clone();
+            if tokio::runtime::Handle::try_current().is_ok() {
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        database::credentials::delete(&pool, id).await
+                    })
+                })?;
+            } else {
+                let runtime = tokio::runtime::Runtime::new()?;
+                runtime.block_on(async { database::credentials::delete(&pool, id).await })?;
+            }
+        } else {
+            self.persist_credentials()?;
+        }
 
         // 立即回写统计数据，清除已删除凭据的残留条目
         self.save_stats();

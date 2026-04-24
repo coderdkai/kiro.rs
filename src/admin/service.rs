@@ -9,6 +9,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
+use crate::kiro::database;
 use crate::kiro::model::credentials::KiroCredentials;
 use crate::kiro::token_manager::MultiTokenManager;
 
@@ -165,6 +166,25 @@ impl AdminService {
                 },
             );
         }
+        if let Some(pool) = &self.db_pool {
+            let next_reset_at = balance.next_reset_at.map(|v| v.to_string());
+            database::balance::upsert(
+                pool,
+                id,
+                balance.subscription_title.as_deref(),
+                balance.current_usage,
+                balance.usage_limit,
+                balance.remaining,
+                balance.usage_percentage,
+                next_reset_at.as_deref(),
+            )
+            .await
+            .map_err(|e| AdminServiceError::InternalError(e.to_string()))?;
+            self.token_manager
+                .flush_credentials()
+                .await
+                .map_err(|e| AdminServiceError::InternalError(e.to_string()))?;
+        }
         self.save_balance_cache();
 
         Ok(balance)
@@ -272,6 +292,14 @@ impl AdminService {
         {
             let mut cache = self.balance_cache.lock();
             cache.remove(&id);
+        }
+        if let Some(pool) = &self.db_pool {
+            let pool = pool.clone();
+            tokio::spawn(async move {
+                if let Err(e) = database::balance::delete(&pool, id).await {
+                    tracing::warn!("删除余额缓存失败: {}", e);
+                }
+            });
         }
         self.save_balance_cache();
 
