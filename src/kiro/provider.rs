@@ -258,8 +258,28 @@ impl KiroProvider {
                 continue;
             }
 
-            // 普通瞬态错误（限流 429 / 408 / 5xx）
-            if matches!(status.as_u16(), 408 | 429) || status.is_server_error() {
+            // 429 普通限流：计入凭据失败次数
+            if status.as_u16() == 429 {
+                tracing::warn!(
+                    "MCP 请求失败（429 限流，尝试 {}/{}）: {} {}",
+                    attempt + 1,
+                    max_retries,
+                    status,
+                    body
+                );
+                let has_available = self.token_manager.report_failure(ctx.id);
+                if !has_available {
+                    anyhow::bail!("MCP 请求失败（所有凭据已被限流禁用）: {} {}", status, body);
+                }
+                last_error = Some(anyhow::anyhow!("MCP 请求失败: {} {}", status, body));
+                if attempt + 1 < max_retries {
+                    sleep(Self::retry_delay(attempt)).await;
+                }
+                continue;
+            }
+
+            // 408/5xx - 瞬态上游错误
+            if status.as_u16() == 408 || status.is_server_error() {
                 tracing::warn!(
                     "MCP 请求失败（上游瞬态错误，尝试 {}/{}）: {} {}",
                     attempt + 1,
@@ -482,9 +502,38 @@ impl KiroProvider {
                 continue;
             }
 
-            // 429/408/5xx - 普通瞬态上游错误：延迟重试但不禁用或切换凭据
-            // （避免普通限流 / 502 high load 等瞬态错误把所有凭据锁死）
-            if matches!(status.as_u16(), 408 | 429) || status.is_server_error() {
+            // 429 普通限流：计入凭据失败次数，累积到阈值后禁用并切换
+            if status.as_u16() == 429 {
+                tracing::warn!(
+                    "API 请求失败（429 限流，尝试 {}/{}）: {} {}",
+                    attempt + 1,
+                    max_retries,
+                    status,
+                    body
+                );
+                let has_available = self.token_manager.report_failure(ctx.id);
+                if !has_available {
+                    anyhow::bail!(
+                        "{} API 请求失败（所有凭据已被限流禁用）: {} {}",
+                        api_type,
+                        status,
+                        body
+                    );
+                }
+                last_error = Some(anyhow::anyhow!(
+                    "{} API 请求失败: {} {}",
+                    api_type,
+                    status,
+                    body
+                ));
+                if attempt + 1 < max_retries {
+                    sleep(Self::retry_delay(attempt)).await;
+                }
+                continue;
+            }
+
+            // 408/5xx - 瞬态上游错误：延迟重试但不禁用或切换凭据
+            if status.as_u16() == 408 || status.is_server_error() {
                 tracing::warn!(
                     "API 请求失败（上游瞬态错误，尝试 {}/{}）: {} {}",
                     attempt + 1,

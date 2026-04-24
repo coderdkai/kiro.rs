@@ -1194,7 +1194,7 @@ impl MultiTokenManager {
     /// # Arguments
     /// * `id` - 凭据 ID（来自 CallContext）
     pub fn report_failure(&self, id: u64) -> bool {
-        let result = {
+        let (result, was_disabled) = {
             let mut entries = self.entries.lock();
             let mut current_id = self.current_id.lock();
 
@@ -1210,6 +1210,7 @@ impl MultiTokenManager {
             entry.failure_count += 1;
             entry.last_used_at = Some(Utc::now().to_rfc3339());
             let failure_count = entry.failure_count;
+            let mut newly_disabled = false;
 
             tracing::warn!(
                 "凭据 #{} API 调用失败（{}/{}）",
@@ -1221,9 +1222,9 @@ impl MultiTokenManager {
             if failure_count >= MAX_FAILURES_PER_CREDENTIAL {
                 entry.disabled = true;
                 entry.disabled_reason = Some(DisabledReason::TooManyFailures);
+                newly_disabled = true;
                 tracing::error!("凭据 #{} 已连续失败 {} 次，已被禁用", id, failure_count);
 
-                // 切换到优先级最高的可用凭据
                 if let Some(next) = entries
                     .iter()
                     .filter(|e| !e.disabled)
@@ -1240,9 +1241,14 @@ impl MultiTokenManager {
                 }
             }
 
-            entries.iter().any(|e| !e.disabled)
+            (entries.iter().any(|e| !e.disabled), newly_disabled)
         };
         self.save_stats_debounced();
+        if was_disabled {
+            if let Err(e) = self.persist_credentials() {
+                tracing::warn!("凭据禁用后持久化失败: {}", e);
+            }
+        }
         result
     }
 
@@ -1269,12 +1275,10 @@ impl MultiTokenManager {
             entry.disabled = true;
             entry.disabled_reason = Some(DisabledReason::QuotaExceeded);
             entry.last_used_at = Some(Utc::now().to_rfc3339());
-            // 设为阈值，便于在管理面板中直观看到该凭据已不可用
             entry.failure_count = MAX_FAILURES_PER_CREDENTIAL;
 
             tracing::error!("凭据 #{} 额度已用尽（MONTHLY_REQUEST_COUNT），已被禁用", id);
 
-            // 切换到优先级最高的可用凭据
             if let Some(next) = entries
                 .iter()
                 .filter(|e| !e.disabled)
@@ -1293,6 +1297,9 @@ impl MultiTokenManager {
             }
         };
         self.save_stats_debounced();
+        if let Err(e) = self.persist_credentials() {
+            tracing::warn!("凭据禁用后持久化失败: {}", e);
+        }
         result
     }
 
@@ -1301,7 +1308,7 @@ impl MultiTokenManager {
     /// 连续刷新失败达到阈值后禁用凭据并切换，阈值内保持当前凭据不切换，
     /// 与 API 401/403 的累计失败策略保持一致。
     pub fn report_refresh_failure(&self, id: u64) -> bool {
-        let result = {
+        let (result, was_disabled) = {
             let mut entries = self.entries.lock();
             let mut current_id = self.current_id.lock();
 
@@ -1349,13 +1356,18 @@ impl MultiTokenManager {
                     next.id,
                     next.credentials.priority
                 );
-                true
+                (true, true)
             } else {
                 tracing::error!("所有凭据均已禁用！");
-                false
+                (false, true)
             }
         };
         self.save_stats_debounced();
+        if was_disabled {
+            if let Err(e) = self.persist_credentials() {
+                tracing::warn!("凭据禁用后持久化失败: {}", e);
+            }
+        }
         result
     }
 
@@ -1404,6 +1416,9 @@ impl MultiTokenManager {
             }
         };
         self.save_stats_debounced();
+        if let Err(e) = self.persist_credentials() {
+            tracing::warn!("凭据禁用后持久化失败: {}", e);
+        }
         result
     }
 
@@ -2122,7 +2137,7 @@ mod tests {
         let mut existing = KiroCredentials::default();
         existing.refresh_token = Some("a".repeat(150));
 
-        let manager = MultiTokenManager::new(config, vec![existing], None, None, false).unwrap();
+        let manager = MultiTokenManager::new(config, vec![existing], None, None, false, None).unwrap();
 
         let mut duplicate = KiroCredentials::default();
         duplicate.refresh_token = Some("a".repeat(150));
@@ -2135,7 +2150,7 @@ mod tests {
     #[tokio::test]
     async fn test_add_credential_api_key_success() {
         let config = Config::default();
-        let manager = MultiTokenManager::new(config, vec![], None, None, false).unwrap();
+        let manager = MultiTokenManager::new(config, vec![], None, None, false, None).unwrap();
 
         let mut api_key_cred = KiroCredentials::default();
         api_key_cred.kiro_api_key = Some("ksk_test_key_123".to_string());
@@ -2157,7 +2172,7 @@ mod tests {
         existing.kiro_api_key = Some("ksk_existing_key".to_string());
         existing.auth_method = Some("api_key".to_string());
 
-        let manager = MultiTokenManager::new(config, vec![existing], None, None, false).unwrap();
+        let manager = MultiTokenManager::new(config, vec![existing], None, None, false, None).unwrap();
 
         let mut duplicate = KiroCredentials::default();
         duplicate.kiro_api_key = Some("ksk_existing_key".to_string());
@@ -2175,7 +2190,7 @@ mod tests {
     #[tokio::test]
     async fn test_add_credential_api_key_empty_rejected() {
         let config = Config::default();
-        let manager = MultiTokenManager::new(config, vec![], None, None, false).unwrap();
+        let manager = MultiTokenManager::new(config, vec![], None, None, false, None).unwrap();
 
         let mut cred = KiroCredentials::default();
         cred.kiro_api_key = Some(String::new());
@@ -2193,7 +2208,7 @@ mod tests {
     #[tokio::test]
     async fn test_add_credential_api_key_missing_key_rejected() {
         let config = Config::default();
-        let manager = MultiTokenManager::new(config, vec![], None, None, false).unwrap();
+        let manager = MultiTokenManager::new(config, vec![], None, None, false, None).unwrap();
 
         let mut cred = KiroCredentials::default();
         cred.auth_method = Some("api_key".to_string());
@@ -2215,7 +2230,7 @@ mod tests {
         let mut oauth_cred = KiroCredentials::default();
         oauth_cred.refresh_token = Some("a".repeat(150));
 
-        let manager = MultiTokenManager::new(config, vec![oauth_cred], None, None, false).unwrap();
+        let manager = MultiTokenManager::new(config, vec![oauth_cred], None, None, false, None).unwrap();
 
         let mut api_key_cred = KiroCredentials::default();
         api_key_cred.kiro_api_key = Some("ksk_new_key".to_string());
@@ -2238,7 +2253,7 @@ mod tests {
         cred2.priority = 1;
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
         assert_eq!(manager.total_count(), 2);
         assert_eq!(manager.available_count(), 2);
     }
@@ -2246,7 +2261,7 @@ mod tests {
     #[test]
     fn test_multi_token_manager_empty_credentials() {
         let config = Config::default();
-        let result = MultiTokenManager::new(config, vec![], None, None, false);
+        let result = MultiTokenManager::new(config, vec![], None, None, false, None);
         // 支持 0 个凭据启动（可通过管理面板添加）
         assert!(result.is_ok());
         let manager = result.unwrap();
@@ -2262,7 +2277,7 @@ mod tests {
         let mut cred2 = KiroCredentials::default();
         cred2.id = Some(1); // 重复 ID
 
-        let result = MultiTokenManager::new(config, vec![cred1, cred2], None, None, false);
+        let result = MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None);
         assert!(result.is_err());
         let err_msg = result.err().unwrap().to_string();
         assert!(
@@ -2285,7 +2300,7 @@ mod tests {
         good_cred.refresh_token = Some("valid_token".to_string());
 
         let manager =
-            MultiTokenManager::new(config, vec![bad_cred, good_cred], None, None, false).unwrap();
+            MultiTokenManager::new(config, vec![bad_cred, good_cred], None, None, false, None).unwrap();
         assert_eq!(manager.total_count(), 2);
         assert_eq!(manager.available_count(), 1); // bad_cred 被禁用，只剩 1 个可用
     }
@@ -2299,7 +2314,7 @@ mod tests {
         cred.auth_method = Some("api_key".to_string());
         cred.kiro_api_key = Some("ksk_test123".to_string());
 
-        let manager = MultiTokenManager::new(config, vec![cred], None, None, false).unwrap();
+        let manager = MultiTokenManager::new(config, vec![cred], None, None, false, None).unwrap();
         assert_eq!(manager.total_count(), 1);
         assert_eq!(manager.available_count(), 1);
     }
@@ -2311,7 +2326,7 @@ mod tests {
         let cred2 = KiroCredentials::default();
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
 
         // 凭据会自动分配 ID（从 1 开始）
         // 前两次失败不会禁用（使用 ID 1）
@@ -2335,7 +2350,7 @@ mod tests {
         let config = Config::default();
         let cred = KiroCredentials::default();
 
-        let manager = MultiTokenManager::new(config, vec![cred], None, None, false).unwrap();
+        let manager = MultiTokenManager::new(config, vec![cred], None, None, false, None).unwrap();
 
         // 失败两次（使用 ID 1）
         manager.report_failure(1);
@@ -2359,7 +2374,7 @@ mod tests {
         cred2.refresh_token = Some("token2".to_string());
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
 
         let initial_id = manager.snapshot().current_id;
 
@@ -2383,6 +2398,7 @@ mod tests {
             None,
             None,
             false,
+            None,
         )
         .unwrap();
 
@@ -2408,7 +2424,7 @@ mod tests {
         cred2.expires_at = Some((Utc::now() + Duration::hours(1)).to_rfc3339());
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
 
         // 凭据会自动分配 ID（从 1 开始）
         for _ in 0..MAX_FAILURES_PER_CREDENTIAL {
@@ -2441,7 +2457,7 @@ mod tests {
         good_cred.expires_at = Some((Utc::now() + Duration::hours(1)).to_rfc3339());
 
         let manager =
-            MultiTokenManager::new(config, vec![bad_cred, good_cred], None, None, false).unwrap();
+            MultiTokenManager::new(config, vec![bad_cred, good_cred], None, None, false, None).unwrap();
 
         let ctx = manager.acquire_context(None).await.unwrap();
         assert_eq!(ctx.id, 2);
@@ -2455,7 +2471,7 @@ mod tests {
         let cred2 = KiroCredentials::default();
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
 
         assert_eq!(manager.available_count(), 2);
         for _ in 0..(MAX_FAILURES_PER_CREDENTIAL - 1) {
@@ -2480,7 +2496,7 @@ mod tests {
         let cred2 = KiroCredentials::default();
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
 
         for _ in 0..MAX_FAILURES_PER_CREDENTIAL {
             manager.report_refresh_failure(1);
@@ -2503,7 +2519,7 @@ mod tests {
         let cred2 = KiroCredentials::default();
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
 
         // 凭据会自动分配 ID（从 1 开始）
         assert_eq!(manager.available_count(), 2);
@@ -2522,7 +2538,7 @@ mod tests {
         let cred2 = KiroCredentials::default();
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
 
         manager.report_quota_exhausted(1);
         manager.report_quota_exhausted(2);
