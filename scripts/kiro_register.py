@@ -1218,22 +1218,48 @@ class KiroRegister:
         except Exception as e:
             self.log(f"  ❌ CBOR 解析失败: {e}")
             return None
-        access_token = resp_data.get("accessToken", "")
+        cbor_access_token = resp_data.get("accessToken", "")
         kiro_csrf = resp_data.get("csrfToken", "")
         expires_in = resp_data.get("expiresIn", 0)
-        if not access_token:
+        if not cbor_access_token:
             self.log(f"  ❌ 无 accessToken: {resp_data}")
             return None
-        self.log(f"  ✅ accessToken={access_token[:60]}...")
+        self.log(f"  CBOR resp keys: {list(resp_data.keys())}")
+        self.log(f"  CBOR accessToken={cbor_access_token[:60]}...")
         self.log(f"  ✅ csrfToken={kiro_csrf[:30]}...")
         self.log(f"  expiresIn={expires_in}")
-        self.log(f"  CBOR resp keys: {list(resp_data.keys())}")
 
-        # 提取 UserId: 优先从 Set-Cookie，备选从 JWT sub 解码
+        # 从 Set-Cookie 提取真实的浏览器 cookie 值
+        # Set-Cookie 中的值才是浏览器实际使用的 cookie，CBOR body 中的值可能不同
+        cookie_at = r.cookies.get("AccessToken", "")
+        cookie_st = r.cookies.get("SessionToken", "")
         user_id = r.cookies.get("UserId", "")
-        if user_id:
-            self.log(f"  ✅ UserId (from cookie): {user_id}")
+        cookie_idp = r.cookies.get("Idp", "")
+
+        self.log(f"  Set-Cookie 中的 cookie:")
+        self.log(f"    AccessToken: {'有 (len=' + str(len(cookie_at)) + ')' if cookie_at else '无'}")
+        self.log(f"    SessionToken: {'有 (len=' + str(len(cookie_st)) + ')' if cookie_st else '无'}")
+        self.log(f"    UserId: {user_id if user_id else '无'}")
+        self.log(f"    Idp: {cookie_idp if cookie_idp else '无'}")
+
+        # 使用 Set-Cookie 值优先，CBOR body 值备选
+        access_token = cookie_at if cookie_at else cbor_access_token
+        session_token = cookie_st if cookie_st else bearer_token
+        if cookie_at:
+            self.log(f"  ✅ 使用 Set-Cookie AccessToken (len={len(cookie_at)})")
+            if cookie_at != cbor_access_token:
+                self.log(f"  ⚠️ Set-Cookie AT 与 CBOR AT 不同!")
         else:
+            self.log(f"  ⚠️ Set-Cookie 无 AccessToken, 使用 CBOR body 值")
+
+        if cookie_st:
+            self.log(f"  ✅ 使用 Set-Cookie SessionToken (len={len(cookie_st)})")
+            if cookie_st != bearer_token:
+                self.log(f"  ⚠️ Set-Cookie ST 与 bearer_token 不同!")
+        else:
+            self.log(f"  ⚠️ Set-Cookie 无 SessionToken, 使用 bearer_token")
+
+        if not user_id:
             self.log("  ⚠️ Set-Cookie 中无 UserId, 尝试从 AccessToken JWT 解码...")
             try:
                 import base64 as _b64
@@ -1255,7 +1281,7 @@ class KiroRegister:
 
         return {
             "accessToken": access_token,
-            "sessionToken": bearer_token,
+            "sessionToken": session_token,
             "csrfToken": kiro_csrf,
             "expiresIn": expires_in,
             "userId": user_id,
