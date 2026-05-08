@@ -14,20 +14,14 @@ if [ -n "$CONDUCTOR_ROOT_PATH" ] && [ -f "$CONDUCTOR_ROOT_PATH/config.json" ]; t
   fi
 fi
 
-# Symlink credentials files from root (shared across worktrees)
-if [ -n "$CONDUCTOR_ROOT_PATH" ]; then
-  for f in credentials.json; do
-    if [ -f "$CONDUCTOR_ROOT_PATH/$f" ]; then
-      ln -sf "$CONDUCTOR_ROOT_PATH/$f" "$f"
-      echo "  Symlinked $f"
-    fi
-  done
-  # Also symlink any credentials.*.json files
-  for f in "$CONDUCTOR_ROOT_PATH"/credentials.*.json; do
+# Symlink database files from root (shared across worktrees)
+if [ -n "$CONDUCTOR_ROOT_PATH" ] && [ -d "$CONDUCTOR_ROOT_PATH/config" ]; then
+  mkdir -p config
+  for f in "$CONDUCTOR_ROOT_PATH"/config/credentials.db*; do
     if [ -f "$f" ]; then
       fname=$(basename "$f")
-      ln -sf "$f" "$fname"
-      echo "  Symlinked $fname"
+      ln -sf "$f" "config/$fname"
+      echo "  Symlinked config/$fname"
     fi
   done
 fi

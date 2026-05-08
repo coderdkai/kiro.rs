@@ -518,18 +518,14 @@ pub struct MultiTokenManager {
     current_id: Mutex<u64>,
     /// Token 刷新锁，确保同一时间只有一个刷新操作
     refresh_lock: TokioMutex<()>,
-    /// 凭据文件路径（用于回写）
-    credentials_path: Option<PathBuf>,
-    /// 是否为多凭据格式（数组格式才回写）
-    is_multiple_format: bool,
     /// 负载均衡模式（运行时可修改）
     load_balancing_mode: Mutex<String>,
     /// 最近一次统计持久化时间（用于 debounce）
     last_stats_save_at: Mutex<Option<Instant>>,
     /// 统计数据是否有未落盘更新
     stats_dirty: AtomicBool,
-    /// 数据库连接池（可选）
-    db_pool: Option<SqlitePool>,
+    /// 数据库连接池
+    db_pool: SqlitePool,
 }
 
 /// 每个凭据最大 API 调用失败次数
@@ -553,21 +549,11 @@ pub struct CallContext {
 
 impl MultiTokenManager {
     /// 创建多凭据 Token 管理器
-    ///
-    /// # Arguments
-    /// * `config` - 应用配置
-    /// * `credentials` - 凭据列表
-    /// * `proxy` - 可选的代理配置
-    /// * `credentials_path` - 凭据文件路径（用于回写）
-    /// * `is_multiple_format` - 是否为多凭据格式（数组格式才回写）
-    /// * `db_pool` - 数据库连接池（可选）
     pub fn new(
         config: Config,
         credentials: Vec<KiroCredentials>,
         proxy: Option<ProxyConfig>,
-        credentials_path: Option<PathBuf>,
-        is_multiple_format: bool,
-        db_pool: Option<SqlitePool>,
+        db_pool: SqlitePool,
     ) -> anyhow::Result<Self> {
         // 计算当前最大 ID，为没有 ID 的凭据分配新 ID
         let max_existing_id = credentials.iter().filter_map(|c| c.id).max().unwrap_or(0);
@@ -656,8 +642,6 @@ impl MultiTokenManager {
             entries: Mutex::new(entries),
             current_id: Mutex::new(initial_id),
             refresh_lock: TokioMutex::new(()),
-            credentials_path,
-            is_multiple_format,
             load_balancing_mode: Mutex::new(load_balancing_mode),
             last_stats_save_at: Mutex::new(None),
             stats_dirty: AtomicBool::new(false),
@@ -997,79 +981,28 @@ impl MultiTokenManager {
         Ok(())
     }
 
-    /// 将凭据列表回写到源存储
-    ///
-    /// SQLite 启用时写入数据库；否则仅多凭据 JSON 格式才回写。
-    ///
-    /// # Returns
-    /// - `Ok(true)` - 成功写入存储
-    /// - `Ok(false)` - 跳过写入（非多凭据格式或无路径配置）
-    /// - `Err(_)` - 写入失败
+    /// 将凭据列表持久化到 SQLite
     fn persist_credentials(&self) -> anyhow::Result<bool> {
-        use anyhow::Context;
-
-        // SQLite 模式直接回写数据库
-        if let Some(pool) = &self.db_pool {
-            let pool = pool.clone();
-            if tokio::runtime::Handle::try_current().is_ok() {
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(async { self.persist_credentials_to_db(&pool).await })
-                })?;
-            } else {
-                let runtime = tokio::runtime::Runtime::new()?;
-                runtime.block_on(async { self.persist_credentials_to_db(&pool).await })?;
-            }
-
-            tracing::debug!("已回写凭据到 SQLite");
-            return Ok(true);
-        }
-
-        // 仅多凭据格式才回写 JSON
-        if !self.is_multiple_format {
-            return Ok(false);
-        }
-
-        let path = match &self.credentials_path {
-            Some(p) => p,
-            None => return Ok(false),
-        };
-
-        // 收集所有凭据
-        let credentials: Vec<KiroCredentials> = {
-            let entries = self.entries.lock();
-            entries
-                .iter()
-                .map(|e| {
-                    let mut cred = e.credentials.clone();
-                    cred.canonicalize_auth_method();
-                    // 同步 disabled 状态到凭据对象
-                    cred.disabled = e.disabled;
-                    cred
-                })
-                .collect()
-        };
-
-        // 序列化为 pretty JSON
-        let json = serde_json::to_string_pretty(&credentials).context("序列化凭据失败")?;
-
-        // 写入文件（在 Tokio runtime 内使用 block_in_place 避免阻塞 worker）
+        let pool = self.db_pool.clone();
         if tokio::runtime::Handle::try_current().is_ok() {
-            tokio::task::block_in_place(|| std::fs::write(path, &json))
-                .with_context(|| format!("回写凭据文件失败: {:?}", path))?;
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(async { self.persist_credentials_to_db(&pool).await })
+            })?;
         } else {
-            std::fs::write(path, &json).with_context(|| format!("回写凭据文件失败: {:?}", path))?;
+            let runtime = tokio::runtime::Runtime::new()?;
+            runtime.block_on(async { self.persist_credentials_to_db(&pool).await })?;
         }
 
-        tracing::debug!("已回写凭据到文件: {:?}", path);
+        tracing::debug!("已持久化凭据到数据库");
         Ok(true)
     }
 
-    /// 获取缓存目录（凭据文件所在目录）
+    /// 获取缓存目录（数据库文件所在目录）
     pub fn cache_dir(&self) -> Option<PathBuf> {
-        self.credentials_path
-            .as_ref()
-            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        std::path::Path::new(&self.config.database.path)
+            .parent()
+            .map(|d| d.to_path_buf())
     }
 
     /// 统计数据文件路径
@@ -1698,12 +1631,8 @@ impl MultiTokenManager {
     }
 
     pub async fn flush_credentials(&self) -> anyhow::Result<bool> {
-        if let Some(pool) = &self.db_pool {
-            self.persist_credentials_to_db(pool).await?;
-            return Ok(true);
-        }
-
-        self.persist_credentials()
+        self.persist_credentials_to_db(&self.db_pool).await?;
+        Ok(true)
     }
 
     /// 添加新凭据（Admin API）
@@ -1814,13 +1743,13 @@ impl MultiTokenManager {
         validated_cred.proxy_password = new_cred.proxy_password;
         validated_cred.kiro_api_key = new_cred.kiro_api_key;
 
-        // 6. SQLite 模式先落库，再加入内存
-        if let Some(pool) = &self.db_pool {
+        // 6. 先落库，再加入内存
+        {
             let mut db_cred = validated_cred.clone();
             db_cred.id = None;
-            let inserted_id = database::credentials::insert(pool, &db_cred).await?;
+            let inserted_id = database::credentials::insert(&self.db_pool, &db_cred).await?;
             validated_cred.id = Some(inserted_id);
-            database::stats::init(pool, inserted_id).await?;
+            database::stats::init(&self.db_pool, inserted_id).await?;
 
             {
                 let mut entries = self.entries.lock();
@@ -1837,28 +1766,8 @@ impl MultiTokenManager {
             }
 
             tracing::info!("成功添加凭据 #{}", inserted_id);
-            return Ok(inserted_id);
+            Ok(inserted_id)
         }
-
-        {
-            let mut entries = self.entries.lock();
-            entries.push(CredentialEntry {
-                id: new_id,
-                credentials: validated_cred,
-                failure_count: 0,
-                refresh_failure_count: 0,
-                disabled: false,
-                disabled_reason: None,
-                success_count: 0,
-                last_used_at: None,
-            });
-        }
-
-        // 7. 持久化 JSON
-        self.persist_credentials()?;
-
-        tracing::info!("成功添加凭据 #{}", new_id);
-        Ok(new_id)
     }
 
     /// 删除凭据（Admin API）
@@ -1917,9 +1826,9 @@ impl MultiTokenManager {
             }
         }
 
-        // 持久化更改
-        if let Some(pool) = &self.db_pool {
-            let pool = pool.clone();
+        // 从数据库删除
+        {
+            let pool = self.db_pool.clone();
             if tokio::runtime::Handle::try_current().is_ok() {
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
@@ -1930,8 +1839,6 @@ impl MultiTokenManager {
                 let runtime = tokio::runtime::Runtime::new()?;
                 runtime.block_on(async { database::credentials::delete(&pool, id).await })?;
             }
-        } else {
-            self.persist_credentials()?;
         }
 
         // 立即回写统计数据，清除已删除凭据的残留条目
@@ -2043,6 +1950,16 @@ impl Drop for MultiTokenManager {
 mod tests {
     use super::*;
 
+    async fn test_db_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("create in-memory db");
+        crate::kiro::database::run_migrations(&pool)
+            .await
+            .expect("run migrations");
+        pool
+    }
+
     #[test]
     fn test_is_token_expired_with_expired_token() {
         let mut credentials = KiroCredentials::default();
@@ -2112,7 +2029,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_refresh_token_rejects_api_key_credential() {
         let config = Config::default();
         let mut credentials = KiroCredentials::default();
@@ -2130,14 +2047,14 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_add_credential_reject_duplicate_refresh_token() {
         let config = Config::default();
 
         let mut existing = KiroCredentials::default();
         existing.refresh_token = Some("a".repeat(150));
 
-        let manager = MultiTokenManager::new(config, vec![existing], None, None, false, None).unwrap();
+        let manager = MultiTokenManager::new(config, vec![existing], None, test_db_pool().await).unwrap();
 
         let mut duplicate = KiroCredentials::default();
         duplicate.refresh_token = Some("a".repeat(150));
@@ -2147,10 +2064,10 @@ mod tests {
         assert!(result.err().unwrap().to_string().contains("凭据已存在"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_add_credential_api_key_success() {
         let config = Config::default();
-        let manager = MultiTokenManager::new(config, vec![], None, None, false, None).unwrap();
+        let manager = MultiTokenManager::new(config, vec![], None, test_db_pool().await).unwrap();
 
         let mut api_key_cred = KiroCredentials::default();
         api_key_cred.kiro_api_key = Some("ksk_test_key_123".to_string());
@@ -2164,7 +2081,7 @@ mod tests {
         assert_eq!(manager.available_count(), 1);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_add_credential_reject_duplicate_api_key() {
         let config = Config::default();
 
@@ -2172,7 +2089,7 @@ mod tests {
         existing.kiro_api_key = Some("ksk_existing_key".to_string());
         existing.auth_method = Some("api_key".to_string());
 
-        let manager = MultiTokenManager::new(config, vec![existing], None, None, false, None).unwrap();
+        let manager = MultiTokenManager::new(config, vec![existing], None, test_db_pool().await).unwrap();
 
         let mut duplicate = KiroCredentials::default();
         duplicate.kiro_api_key = Some("ksk_existing_key".to_string());
@@ -2187,10 +2104,10 @@ mod tests {
             .contains("kiroApiKey 重复"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_add_credential_api_key_empty_rejected() {
         let config = Config::default();
-        let manager = MultiTokenManager::new(config, vec![], None, None, false, None).unwrap();
+        let manager = MultiTokenManager::new(config, vec![], None, test_db_pool().await).unwrap();
 
         let mut cred = KiroCredentials::default();
         cred.kiro_api_key = Some(String::new());
@@ -2205,10 +2122,10 @@ mod tests {
             .contains("kiroApiKey 为空"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_add_credential_api_key_missing_key_rejected() {
         let config = Config::default();
-        let manager = MultiTokenManager::new(config, vec![], None, None, false, None).unwrap();
+        let manager = MultiTokenManager::new(config, vec![], None, test_db_pool().await).unwrap();
 
         let mut cred = KiroCredentials::default();
         cred.auth_method = Some("api_key".to_string());
@@ -2223,14 +2140,14 @@ mod tests {
             .contains("缺少 kiroApiKey"));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_add_credential_api_key_and_oauth_coexist() {
         let config = Config::default();
 
         let mut oauth_cred = KiroCredentials::default();
         oauth_cred.refresh_token = Some("a".repeat(150));
 
-        let manager = MultiTokenManager::new(config, vec![oauth_cred], None, None, false, None).unwrap();
+        let manager = MultiTokenManager::new(config, vec![oauth_cred], None, test_db_pool().await).unwrap();
 
         let mut api_key_cred = KiroCredentials::default();
         api_key_cred.kiro_api_key = Some("ksk_new_key".to_string());
@@ -2244,8 +2161,8 @@ mod tests {
 
     // MultiTokenManager 测试
 
-    #[test]
-    fn test_multi_token_manager_new() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_multi_token_manager_new() {
         let config = Config::default();
         let mut cred1 = KiroCredentials::default();
         cred1.priority = 0;
@@ -2253,15 +2170,15 @@ mod tests {
         cred2.priority = 1;
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, test_db_pool().await).unwrap();
         assert_eq!(manager.total_count(), 2);
         assert_eq!(manager.available_count(), 2);
     }
 
-    #[test]
-    fn test_multi_token_manager_empty_credentials() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_multi_token_manager_empty_credentials() {
         let config = Config::default();
-        let result = MultiTokenManager::new(config, vec![], None, None, false, None);
+        let result = MultiTokenManager::new(config, vec![], None, test_db_pool().await);
         // 支持 0 个凭据启动（可通过管理面板添加）
         assert!(result.is_ok());
         let manager = result.unwrap();
@@ -2269,15 +2186,15 @@ mod tests {
         assert_eq!(manager.available_count(), 0);
     }
 
-    #[test]
-    fn test_multi_token_manager_duplicate_ids() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_multi_token_manager_duplicate_ids() {
         let config = Config::default();
         let mut cred1 = KiroCredentials::default();
         cred1.id = Some(1);
         let mut cred2 = KiroCredentials::default();
         cred2.id = Some(1); // 重复 ID
 
-        let result = MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None);
+        let result = MultiTokenManager::new(config, vec![cred1, cred2], None, test_db_pool().await);
         assert!(result.is_err());
         let err_msg = result.err().unwrap().to_string();
         assert!(
@@ -2287,8 +2204,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_multi_token_manager_api_key_missing_kiro_api_key_auto_disabled() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_multi_token_manager_api_key_missing_kiro_api_key_auto_disabled() {
         let config = Config::default();
 
         // auth_method=api_key 但缺少 kiro_api_key → 应被自动禁用
@@ -2300,13 +2217,13 @@ mod tests {
         good_cred.refresh_token = Some("valid_token".to_string());
 
         let manager =
-            MultiTokenManager::new(config, vec![bad_cred, good_cred], None, None, false, None).unwrap();
+            MultiTokenManager::new(config, vec![bad_cred, good_cred], None, test_db_pool().await).unwrap();
         assert_eq!(manager.total_count(), 2);
         assert_eq!(manager.available_count(), 1); // bad_cred 被禁用，只剩 1 个可用
     }
 
-    #[test]
-    fn test_multi_token_manager_api_key_with_kiro_api_key_not_disabled() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_multi_token_manager_api_key_with_kiro_api_key_not_disabled() {
         let config = Config::default();
 
         // auth_method=api_key 且有 kiro_api_key → 不应被禁用
@@ -2314,19 +2231,19 @@ mod tests {
         cred.auth_method = Some("api_key".to_string());
         cred.kiro_api_key = Some("ksk_test123".to_string());
 
-        let manager = MultiTokenManager::new(config, vec![cred], None, None, false, None).unwrap();
+        let manager = MultiTokenManager::new(config, vec![cred], None, test_db_pool().await).unwrap();
         assert_eq!(manager.total_count(), 1);
         assert_eq!(manager.available_count(), 1);
     }
 
-    #[test]
-    fn test_multi_token_manager_report_failure() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_multi_token_manager_report_failure() {
         let config = Config::default();
         let cred1 = KiroCredentials::default();
         let cred2 = KiroCredentials::default();
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, test_db_pool().await).unwrap();
 
         // 凭据会自动分配 ID（从 1 开始）
         // 前两次失败不会禁用（使用 ID 1）
@@ -2345,12 +2262,12 @@ mod tests {
         assert_eq!(manager.available_count(), 0);
     }
 
-    #[test]
-    fn test_multi_token_manager_report_success() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_multi_token_manager_report_success() {
         let config = Config::default();
         let cred = KiroCredentials::default();
 
-        let manager = MultiTokenManager::new(config, vec![cred], None, None, false, None).unwrap();
+        let manager = MultiTokenManager::new(config, vec![cred], None, test_db_pool().await).unwrap();
 
         // 失败两次（使用 ID 1）
         manager.report_failure(1);
@@ -2365,8 +2282,8 @@ mod tests {
         assert_eq!(manager.available_count(), 1);
     }
 
-    #[test]
-    fn test_multi_token_manager_switch_to_next() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_multi_token_manager_switch_to_next() {
         let config = Config::default();
         let mut cred1 = KiroCredentials::default();
         cred1.refresh_token = Some("token1".to_string());
@@ -2374,7 +2291,7 @@ mod tests {
         cred2.refresh_token = Some("token2".to_string());
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, test_db_pool().await).unwrap();
 
         let initial_id = manager.snapshot().current_id;
 
@@ -2383,8 +2300,8 @@ mod tests {
         assert_ne!(manager.snapshot().current_id, initial_id);
     }
 
-    #[test]
-    fn test_set_load_balancing_mode_persists_to_config_file() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_set_load_balancing_mode_persists_to_config_file() {
         let config_path = std::env::temp_dir().join(format!(
             "kiro-load-balancing-{}.json",
             uuid::Uuid::new_v4()
@@ -2396,9 +2313,7 @@ mod tests {
             config,
             vec![KiroCredentials::default()],
             None,
-            None,
-            false,
-            None,
+            test_db_pool().await,
         )
         .unwrap();
 
@@ -2413,7 +2328,7 @@ mod tests {
         std::fs::remove_file(&config_path).unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_multi_token_manager_acquire_context_auto_recovers_all_disabled() {
         let config = Config::default();
         let mut cred1 = KiroCredentials::default();
@@ -2424,7 +2339,7 @@ mod tests {
         cred2.expires_at = Some((Utc::now() + Duration::hours(1)).to_rfc3339());
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, test_db_pool().await).unwrap();
 
         // 凭据会自动分配 ID（从 1 开始）
         for _ in 0..MAX_FAILURES_PER_CREDENTIAL {
@@ -2442,7 +2357,7 @@ mod tests {
         assert_eq!(manager.available_count(), 2);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_multi_token_manager_acquire_context_balanced_retries_until_bad_credential_disabled() {
         let mut config = Config::default();
         config.load_balancing_mode = "balanced".to_string();
@@ -2457,21 +2372,21 @@ mod tests {
         good_cred.expires_at = Some((Utc::now() + Duration::hours(1)).to_rfc3339());
 
         let manager =
-            MultiTokenManager::new(config, vec![bad_cred, good_cred], None, None, false, None).unwrap();
+            MultiTokenManager::new(config, vec![bad_cred, good_cred], None, test_db_pool().await).unwrap();
 
         let ctx = manager.acquire_context(None).await.unwrap();
         assert_eq!(ctx.id, 2);
         assert_eq!(ctx.token, "good-token");
     }
 
-    #[test]
-    fn test_multi_token_manager_report_refresh_failure() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_multi_token_manager_report_refresh_failure() {
         let config = Config::default();
         let cred1 = KiroCredentials::default();
         let cred2 = KiroCredentials::default();
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, test_db_pool().await).unwrap();
 
         assert_eq!(manager.available_count(), 2);
         for _ in 0..(MAX_FAILURES_PER_CREDENTIAL - 1) {
@@ -2489,14 +2404,14 @@ mod tests {
         assert_eq!(snapshot.current_id, 2);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_multi_token_manager_refresh_failure_disabled_is_not_auto_recovered() {
         let config = Config::default();
         let cred1 = KiroCredentials::default();
         let cred2 = KiroCredentials::default();
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, test_db_pool().await).unwrap();
 
         for _ in 0..MAX_FAILURES_PER_CREDENTIAL {
             manager.report_refresh_failure(1);
@@ -2512,14 +2427,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_multi_token_manager_report_quota_exhausted() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_multi_token_manager_report_quota_exhausted() {
         let config = Config::default();
         let cred1 = KiroCredentials::default();
         let cred2 = KiroCredentials::default();
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, test_db_pool().await).unwrap();
 
         // 凭据会自动分配 ID（从 1 开始）
         assert_eq!(manager.available_count(), 2);
@@ -2531,14 +2446,14 @@ mod tests {
         assert_eq!(manager.available_count(), 0);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_multi_token_manager_quota_disabled_is_not_auto_recovered() {
         let config = Config::default();
         let cred1 = KiroCredentials::default();
         let cred2 = KiroCredentials::default();
 
         let manager =
-            MultiTokenManager::new(config, vec![cred1, cred2], None, None, false, None).unwrap();
+            MultiTokenManager::new(config, vec![cred1, cred2], None, test_db_pool().await).unwrap();
 
         manager.report_quota_exhausted(1);
         manager.report_quota_exhausted(2);

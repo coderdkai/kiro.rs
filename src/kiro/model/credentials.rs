@@ -1,11 +1,8 @@
 //! Kiro OAuth 凭证数据模型
 //!
-//! 支持从 Kiro IDE 的凭证文件加载，使用 Social 认证方式
-//! 支持单凭据和多凭据配置格式
+//! 支持 Social / IdC / API Key 认证方式
 
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::Path;
 
 use crate::http_client::ProxyConfig;
 use crate::model::config::Config;
@@ -126,77 +123,9 @@ fn canonicalize_auth_method_value(value: &str) -> &str {
     }
 }
 
-/// 凭据配置（支持单对象或数组格式）
-///
-/// 自动识别配置文件格式：
-/// - 单对象格式（旧格式，向后兼容）
-/// - 数组格式（新格式，支持多凭据）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum CredentialsConfig {
-    /// 单个凭据（旧格式）
-    Single(KiroCredentials),
-    /// 多凭据数组（新格式）
-    Multiple(Vec<KiroCredentials>),
-}
-
-impl CredentialsConfig {
-    /// 从文件加载凭据配置
-    ///
-    /// - 如果文件不存在，返回空数组
-    /// - 如果文件内容为空，返回空数组
-    /// - 支持单对象或数组格式
-    pub fn load<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
-        let path = path.as_ref();
-
-        // 文件不存在时返回空数组
-        if !path.exists() {
-            return Ok(CredentialsConfig::Multiple(vec![]));
-        }
-
-        let content = fs::read_to_string(path)?;
-
-        // 文件为空时返回空数组
-        if content.trim().is_empty() {
-            return Ok(CredentialsConfig::Multiple(vec![]));
-        }
-
-        let config = serde_json::from_str(&content)?;
-        Ok(config)
-    }
-
-    /// 转换为按优先级排序的凭据列表
-    pub fn into_sorted_credentials(self) -> Vec<KiroCredentials> {
-        match self {
-            CredentialsConfig::Single(mut cred) => {
-                cred.canonicalize_auth_method();
-                vec![cred]
-            }
-            CredentialsConfig::Multiple(mut creds) => {
-                // 按优先级排序（数字越小优先级越高）
-                creds.sort_by_key(|c| c.priority);
-                for cred in &mut creds {
-                    cred.canonicalize_auth_method();
-                }
-                creds
-            }
-        }
-    }
-
-    /// 判断是否为多凭据格式（数组格式）
-    pub fn is_multiple(&self) -> bool {
-        matches!(self, CredentialsConfig::Multiple(_))
-    }
-}
-
 impl KiroCredentials {
     /// 特殊值：显式不使用代理
     pub const PROXY_DIRECT: &'static str = "direct";
-
-    /// 获取默认凭证文件路径
-    pub fn default_credentials_path() -> &'static str {
-        "credentials.json"
-    }
 
     /// 获取有效的 Auth Region（用于 Token 刷新）
     /// 优先级：凭据.auth_region > 凭据.region > config.auth_region > config.region
@@ -354,14 +283,6 @@ mod tests {
     }
 
     #[test]
-    fn test_default_credentials_path() {
-        assert_eq!(
-            KiroCredentials::default_credentials_path(),
-            "credentials.json"
-        );
-    }
-
-    #[test]
     fn test_priority_default() {
         let json = r#"{"refreshToken": "test"}"#;
         let creds = KiroCredentials::from_json(json).unwrap();
@@ -373,40 +294,6 @@ mod tests {
         let json = r#"{"refreshToken": "test", "priority": 5}"#;
         let creds = KiroCredentials::from_json(json).unwrap();
         assert_eq!(creds.priority, 5);
-    }
-
-    #[test]
-    fn test_credentials_config_single() {
-        let json = r#"{"refreshToken": "test", "expiresAt": "2025-12-31T00:00:00Z"}"#;
-        let config: CredentialsConfig = serde_json::from_str(json).unwrap();
-        assert!(matches!(config, CredentialsConfig::Single(_)));
-    }
-
-    #[test]
-    fn test_credentials_config_multiple() {
-        let json = r#"[
-            {"refreshToken": "test1", "priority": 1},
-            {"refreshToken": "test2", "priority": 0}
-        ]"#;
-        let config: CredentialsConfig = serde_json::from_str(json).unwrap();
-        assert!(matches!(config, CredentialsConfig::Multiple(_)));
-        assert_eq!(config.into_sorted_credentials().len(), 2);
-    }
-
-    #[test]
-    fn test_credentials_config_priority_sorting() {
-        let json = r#"[
-            {"refreshToken": "t1", "priority": 2},
-            {"refreshToken": "t2", "priority": 0},
-            {"refreshToken": "t3", "priority": 1}
-        ]"#;
-        let config: CredentialsConfig = serde_json::from_str(json).unwrap();
-        let list = config.into_sorted_credentials();
-
-        // 验证按优先级排序
-        assert_eq!(list[0].refresh_token, Some("t2".to_string())); // priority 0
-        assert_eq!(list[1].refresh_token, Some("t3".to_string())); // priority 1
-        assert_eq!(list[2].refresh_token, Some("t1".to_string())); // priority 2
     }
 
     // ============ Region 字段测试 ============
@@ -533,23 +420,6 @@ mod tests {
 
         let json = creds.to_pretty_json().unwrap();
         assert!(!json.contains("machineId"));
-    }
-
-    #[test]
-    fn test_multiple_credentials_with_different_regions() {
-        // 测试多凭据场景下不同凭据使用各自的 region
-        let json = r#"[
-            {"refreshToken": "t1", "region": "us-east-1"},
-            {"refreshToken": "t2", "region": "eu-west-1"},
-            {"refreshToken": "t3"}
-        ]"#;
-
-        let config: CredentialsConfig = serde_json::from_str(json).unwrap();
-        let list = config.into_sorted_credentials();
-
-        assert_eq!(list[0].region, Some("us-east-1".to_string()));
-        assert_eq!(list[1].region, Some("eu-west-1".to_string()));
-        assert_eq!(list[2].region, None);
     }
 
     #[test]

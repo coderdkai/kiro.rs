@@ -8,6 +8,7 @@ use crate::kiro::model::credentials::KiroCredentials;
 
 /// 数据库凭据行
 #[derive(Debug, sqlx::FromRow)]
+#[allow(dead_code)]
 pub struct CredentialRow {
     pub id: i64,
     pub access_token: Option<String>,
@@ -75,6 +76,7 @@ pub async fn get_all(pool: &SqlitePool) -> Result<Vec<KiroCredentials>> {
 }
 
 /// 根据 ID 获取凭据
+#[allow(dead_code)]
 pub async fn get_by_id(pool: &SqlitePool, id: u64) -> Result<Option<KiroCredentials>> {
     let row = sqlx::query_as::<_, CredentialRow>(
         "SELECT * FROM credentials WHERE id = ?"
@@ -178,36 +180,6 @@ pub async fn delete(pool: &SqlitePool, id: u64) -> Result<()> {
         .execute(pool)
         .await
         .context("删除凭据失败")?;
-
-    Ok(())
-}
-
-/// 更新凭据的 disabled 状态
-pub async fn update_disabled(pool: &SqlitePool, id: u64, disabled: bool) -> Result<()> {
-    let now = Utc::now().to_rfc3339();
-
-    sqlx::query("UPDATE credentials SET disabled = ?, updated_at = ? WHERE id = ?")
-        .bind(disabled)
-        .bind(&now)
-        .bind(id as i64)
-        .execute(pool)
-        .await
-        .context("更新凭据状态失败")?;
-
-    Ok(())
-}
-
-/// 更新凭据优先级
-pub async fn update_priority(pool: &SqlitePool, id: u64, priority: u32) -> Result<()> {
-    let now = Utc::now().to_rfc3339();
-
-    sqlx::query("UPDATE credentials SET priority = ?, updated_at = ? WHERE id = ?")
-        .bind(priority as i64)
-        .bind(&now)
-        .bind(id as i64)
-        .execute(pool)
-        .await
-        .context("更新凭据优先级失败")?;
 
     Ok(())
 }

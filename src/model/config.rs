@@ -165,31 +165,17 @@ pub struct RegisterConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseConfig {
-    /// 是否启用数据库（默认 true）
-    #[serde(default = "default_database_enabled")]
-    pub enabled: bool,
-
     /// 数据库文件路径（默认 "config/credentials.db"）
     #[serde(default = "default_database_path")]
     pub path: String,
-
-    /// 是否启用双写模式（同时写入数据库和 JSON，默认 false）
-    #[serde(default)]
-    pub dual_write: bool,
 }
 
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
-            enabled: default_database_enabled(),
             path: default_database_path(),
-            dual_write: false,
         }
     }
-}
-
-fn default_database_enabled() -> bool {
-    true
 }
 
 fn default_database_path() -> String {
