@@ -40,15 +40,15 @@ pub struct AdminService {
     cache_path: Option<PathBuf>,
     /// 已注册的端点名称集合（用于 add_credential 校验）
     known_endpoints: HashSet<String>,
-    /// 数据库连接池（可选）
-    db_pool: Option<SqlitePool>,
+    /// 数据库连接池
+    db_pool: SqlitePool,
 }
 
 impl AdminService {
     pub fn new(
         token_manager: Arc<MultiTokenManager>,
         known_endpoints: impl IntoIterator<Item = String>,
-        db_pool: Option<SqlitePool>,
+        db_pool: SqlitePool,
     ) -> Self {
         let cache_path = token_manager
             .cache_dir()
@@ -166,10 +166,10 @@ impl AdminService {
                 },
             );
         }
-        if let Some(pool) = &self.db_pool {
+        {
             let next_reset_at = balance.next_reset_at.map(|v| v.to_string());
             database::balance::upsert(
-                pool,
+                &self.db_pool,
                 id,
                 balance.subscription_title.as_deref(),
                 balance.current_usage,
@@ -293,8 +293,8 @@ impl AdminService {
             let mut cache = self.balance_cache.lock();
             cache.remove(&id);
         }
-        if let Some(pool) = &self.db_pool {
-            let pool = pool.clone();
+        {
+            let pool = self.db_pool.clone();
             tokio::spawn(async move {
                 if let Err(e) = database::balance::delete(&pool, id).await {
                     tracing::warn!("删除余额缓存失败: {}", e);

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use kiro::endpoint::{IdeEndpoint, KiroEndpoint};
-use kiro::model::credentials::{CredentialsConfig, KiroCredentials};
+use kiro::model::credentials::KiroCredentials;
 use kiro::provider::KiroProvider;
 use kiro::token_manager::MultiTokenManager;
 use model::arg::Args;
@@ -40,70 +40,23 @@ async fn main() {
         std::process::exit(1);
     });
 
-    // 初始化数据库（如果启用）
-    let db_pool = if config.database.enabled {
-        tracing::info!("数据库已启用，初始化连接池");
-        let db_path = std::path::Path::new(&config.database.path);
-        let pool = kiro::database::init_pool(db_path).await.unwrap_or_else(|e| {
-            tracing::error!("初始化数据库失败: {}", e);
-            std::process::exit(1);
-        });
+    // 初始化数据库
+    let db_path = std::path::Path::new(&config.database.path);
+    let db_pool = kiro::database::init_pool(db_path).await.unwrap_or_else(|e| {
+        tracing::error!("初始化数据库失败: {}", e);
+        std::process::exit(1);
+    });
 
-        // 运行迁移
-        kiro::database::run_migrations(&pool).await.unwrap_or_else(|e| {
-            tracing::error!("运行数据库迁移失败: {:#}", e);
-            std::process::exit(1);
-        });
+    kiro::database::run_migrations(&db_pool).await.unwrap_or_else(|e| {
+        tracing::error!("运行数据库迁移失败: {:#}", e);
+        std::process::exit(1);
+    });
 
-        Some(pool)
-    } else {
-        tracing::info!("数据库未启用，使用 JSON 文件存储");
-        None
-    };
-
-    // 加载凭证（支持 SQLite 或 JSON 存储）
-    let credentials_path = args
-        .credentials
-        .unwrap_or_else(|| KiroCredentials::default_credentials_path().to_string());
-
-    // 如果启用数据库，检查是否需要从 JSON 迁移
-    if let Some(ref pool) = db_pool {
-        let json_path = std::path::Path::new(&credentials_path);
-        if kiro::database::migration::needs_migration(pool, json_path).await.unwrap_or(false) {
-            tracing::info!("检测到需要从 JSON 迁移数据");
-            match kiro::database::migration::migrate_from_json(json_path, pool).await {
-                Ok(count) => {
-                    tracing::info!("成功迁移 {} 个凭据到数据库", count);
-                }
-                Err(e) => {
-                    tracing::error!("迁移失败: {}", e);
-                    std::process::exit(1);
-                }
-            }
-        }
-    }
-
-    let (credentials_list, is_multiple_format) = if let Some(ref pool) = db_pool {
-        let credentials = kiro::database::credentials::get_all(pool).await.unwrap_or_else(|e| {
-            tracing::error!("从数据库加载凭证失败: {}", e);
-            std::process::exit(1);
-        });
-        (credentials, true)
-    } else {
-        let credentials_config = CredentialsConfig::load(&credentials_path).unwrap_or_else(|e| {
-            tracing::error!("加载凭证失败: {}", e);
-            std::process::exit(1);
-        });
-
-        // 判断是否为多凭据格式（用于刷新后回写）
-        let is_multiple_format = credentials_config.is_multiple();
-
-        // 转换为按优先级排序的凭据列表
-        let credentials_list = credentials_config.into_sorted_credentials();
-        (credentials_list, is_multiple_format)
-    };
-
-    let mut credentials_list = credentials_list;
+    // 从数据库读取凭据
+    let mut credentials_list = kiro::database::credentials::get_all(&db_pool).await.unwrap_or_else(|e| {
+        tracing::error!("从数据库加载凭据失败: {}", e);
+        std::process::exit(1);
+    });
 
     // 检查 KIRO_API_KEY 环境变量，自动创建 API Key 凭据
     if let Ok(kiro_api_key) = std::env::var("KIRO_API_KEY") {
@@ -183,8 +136,6 @@ async fn main() {
         config.clone(),
         credentials_list,
         proxy_config.clone(),
-        Some(credentials_path.into()),
-        is_multiple_format,
         db_pool.clone(),
     )
     .unwrap_or_else(|e| {

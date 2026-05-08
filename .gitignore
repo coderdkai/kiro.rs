@@ -9,6 +9,9 @@
 /admin-ui/dist/
 /admin-ui/tsconfig.tsbuildinfo
 /credentials.*
+*.db
+*.db-wal
+*.db-shm
 /kiro_balance_cache.json
 /kiro_stats.json
 /.claude/

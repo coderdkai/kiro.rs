@@ -45,6 +45,9 @@ Thumbs.db
 # Local configuration (keep templates only)
 config.json
 credentials.json
+*.db
+*.db-wal
+*.db-shm
 
 # Docker files
 Dockerfile
