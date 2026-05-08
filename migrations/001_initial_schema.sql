@@ -21,6 +21,10 @@ CREATE TABLE IF NOT EXISTS credentials (
     disabled BOOLEAN NOT NULL DEFAULT 0,
     kiro_api_key TEXT,
     endpoint TEXT,
+    password TEXT,
+    web_access_token TEXT,
+    web_session_token TEXT,
+    web_user_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -137,6 +137,18 @@ pub struct AddCredentialRequest {
     /// 端点名称（可选，未配置时使用 config.defaultEndpoint）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
+
+    /// 注册时的明文密码（用于浏览器重新登录）
+    pub password: Option<String>,
+
+    /// Kiro Web AccessToken cookie 值
+    pub web_access_token: Option<String>,
+
+    /// Kiro Web SessionToken cookie 值
+    pub web_session_token: Option<String>,
+
+    /// Kiro Web UserId cookie 值
+    pub web_user_id: Option<String>,
 }
 
 fn default_auth_method() -> String {

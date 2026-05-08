@@ -31,6 +31,10 @@ pub struct CredentialRow {
     pub disabled: bool,
     pub kiro_api_key: Option<String>,
     pub endpoint: Option<String>,
+    pub password: Option<String>,
+    pub web_access_token: Option<String>,
+    pub web_session_token: Option<String>,
+    pub web_user_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -59,6 +63,10 @@ impl From<CredentialRow> for KiroCredentials {
             disabled: row.disabled,
             kiro_api_key: row.kiro_api_key,
             endpoint: row.endpoint,
+            password: row.password,
+            web_access_token: row.web_access_token,
+            web_session_token: row.web_session_token,
+            web_user_id: row.web_user_id,
         }
     }
 }
@@ -97,8 +105,9 @@ pub async fn insert(pool: &SqlitePool, cred: &KiroCredentials) -> Result<u64> {
             access_token, refresh_token, profile_arn, expires_at, auth_method,
             client_id, client_secret, priority, region, auth_region, api_region,
             machine_id, email, subscription_title, proxy_url, proxy_username,
-            proxy_password, disabled, kiro_api_key, endpoint
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            proxy_password, disabled, kiro_api_key, endpoint,
+            password, web_access_token, web_session_token, web_user_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#
     )
     .bind(&cred.access_token)
@@ -121,6 +130,10 @@ pub async fn insert(pool: &SqlitePool, cred: &KiroCredentials) -> Result<u64> {
     .bind(cred.disabled)
     .bind(&cred.kiro_api_key)
     .bind(&cred.endpoint)
+    .bind(&cred.password)
+    .bind(&cred.web_access_token)
+    .bind(&cred.web_session_token)
+    .bind(&cred.web_user_id)
     .execute(pool)
     .await
     .context("插入凭据失败")?;
@@ -140,6 +153,7 @@ pub async fn update(pool: &SqlitePool, id: u64, cred: &KiroCredentials) -> Resul
             region = ?, auth_region = ?, api_region = ?, machine_id = ?,
             email = ?, subscription_title = ?, proxy_url = ?, proxy_username = ?,
             proxy_password = ?, disabled = ?, kiro_api_key = ?, endpoint = ?,
+            password = ?, web_access_token = ?, web_session_token = ?, web_user_id = ?,
             updated_at = ?
         WHERE id = ?
         "#
@@ -164,6 +178,10 @@ pub async fn update(pool: &SqlitePool, id: u64, cred: &KiroCredentials) -> Resul
     .bind(cred.disabled)
     .bind(&cred.kiro_api_key)
     .bind(&cred.endpoint)
+    .bind(&cred.password)
+    .bind(&cred.web_access_token)
+    .bind(&cred.web_session_token)
+    .bind(&cred.web_user_id)
     .bind(&now)
     .bind(id as i64)
     .execute(pool)

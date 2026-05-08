@@ -1227,11 +1227,38 @@ class KiroRegister:
         self.log(f"  ✅ accessToken={access_token[:60]}...")
         self.log(f"  ✅ csrfToken={kiro_csrf[:30]}...")
         self.log(f"  expiresIn={expires_in}")
+        self.log(f"  CBOR resp keys: {list(resp_data.keys())}")
+
+        # 提取 UserId: 优先从 Set-Cookie，备选从 JWT sub 解码
+        user_id = r.cookies.get("UserId", "")
+        if user_id:
+            self.log(f"  ✅ UserId (from cookie): {user_id}")
+        else:
+            self.log("  ⚠️ Set-Cookie 中无 UserId, 尝试从 AccessToken JWT 解码...")
+            try:
+                import base64 as _b64
+                parts = access_token.split(".")
+                if len(parts) >= 2:
+                    payload_b64 = parts[1] + "=" * (4 - len(parts[1]) % 4)
+                    payload_bytes = _b64.urlsafe_b64decode(payload_b64)
+                    payload_json = json.loads(payload_bytes)
+                    self.log(f"  JWT payload keys: {list(payload_json.keys())}")
+                    user_id = payload_json.get("sub", "") or payload_json.get("userId", "") or payload_json.get("dirId", "")
+                    if user_id:
+                        self.log(f"  ✅ UserId (from JWT): {user_id}")
+                    else:
+                        self.log(f"  ⚠️ JWT 中未找到 UserId 字段")
+                else:
+                    self.log(f"  ⚠️ AccessToken 不是 JWT 格式 (parts={len(parts)})")
+            except Exception as e:
+                self.log(f"  ⚠️ JWT 解码失败: {e}")
+
         return {
             "accessToken": access_token,
             "sessionToken": bearer_token,
             "csrfToken": kiro_csrf,
             "expiresIn": expires_in,
+            "userId": user_id,
         }
 
     # ═══ Step 12f-12j: OIDC Device Authorization Flow → 获取 refreshToken ═══
@@ -1884,6 +1911,7 @@ def main():
                     "email": email_addr, "password": use_password, "name": name,
                     "accessToken": tokens["accessToken"],
                     "sessionToken": tokens["sessionToken"],
+                    "userId": tokens.get("userId", ""),
                     "clientId": device_tokens["clientId"],
                     "clientSecret": device_tokens["clientSecret"],
                     "refreshToken": device_tokens["refreshToken"],
@@ -1894,6 +1922,7 @@ def main():
                     "email": email_addr, "password": use_password, "name": name,
                     "accessToken": tokens["accessToken"],
                     "sessionToken": tokens["sessionToken"],
+                    "userId": tokens.get("userId", ""),
                 }
 
         print("\n" + "=" * 60)

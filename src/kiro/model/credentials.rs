@@ -106,6 +106,22 @@ pub struct KiroCredentials {
     /// 端点名必须在启动时注册的端点 registry 中存在。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
+
+    /// 注册时的明文密码（用于浏览器重新登录）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+
+    /// Kiro Web AccessToken cookie 值（用于浏览器会话注入）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_access_token: Option<String>,
+
+    /// Kiro Web SessionToken cookie 值（SSO bearer token，用于浏览器会话注入）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_session_token: Option<String>,
+
+    /// Kiro Web UserId cookie 值（用于浏览器会话注入）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_user_id: Option<String>,
 }
 
 /// 判断是否为零（用于跳过序列化）

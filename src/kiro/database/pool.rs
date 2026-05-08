@@ -49,13 +49,26 @@ pub async fn init_pool(database_path: &Path) -> Result<SqlitePool> {
 pub async fn run_migrations(pool: &SqlitePool) -> Result<()> {
     info!("开始执行数据库迁移");
 
-    // 读取并执行 Schema
     let schema_sql = include_str!("../../../migrations/001_initial_schema.sql");
-
     sqlx::raw_sql(schema_sql)
         .execute(pool)
         .await
         .context("执行数据库迁移失败")?;
+
+    // 增量迁移：尝试添加新字段，已存在则跳过
+    let alter_statements = include_str!("../../../migrations/002_add_web_tokens.sql");
+    for line in alter_statements.lines() {
+        let stmt = line.trim();
+        if stmt.is_empty() || stmt.starts_with("--") {
+            continue;
+        }
+        if let Err(e) = sqlx::raw_sql(stmt).execute(pool).await {
+            let err_msg = e.to_string();
+            if !err_msg.contains("duplicate column") {
+                return Err(anyhow::anyhow!("迁移失败: {}", err_msg));
+            }
+        }
+    }
 
     info!("数据库迁移完成");
     Ok(())
