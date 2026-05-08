@@ -179,6 +179,11 @@ pub fn create_register_stream(
         let refresh_token = parsed.get("refreshToken").and_then(|v| v.as_str()).map(String::from);
         let client_id = parsed.get("clientId").and_then(|v| v.as_str()).map(String::from);
         let client_secret = parsed.get("clientSecret").and_then(|v| v.as_str()).map(String::from);
+        let password = parsed.get("password").and_then(|v| v.as_str()).map(String::from);
+        let web_access_token = parsed.get("accessToken").and_then(|v| v.as_str()).map(String::from);
+        let web_session_token = parsed.get("sessionToken").and_then(|v| v.as_str()).map(String::from);
+        let web_user_id = parsed.get("userId").and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty()).map(String::from);
 
         if refresh_token.is_none() {
             let msg = "注册结果缺少 refreshToken，无法添加到凭据池";
@@ -211,6 +216,10 @@ pub fn create_register_stream(
             proxy_password: None,
             kiro_api_key: None,
             endpoint: None,
+            password,
+            web_access_token,
+            web_session_token,
+            web_user_id,
         };
 
         match service.add_credential(add_req).await {

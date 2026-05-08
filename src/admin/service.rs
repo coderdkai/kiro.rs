@@ -253,13 +253,17 @@ impl AdminService {
             api_region: req.api_region,
             machine_id: req.machine_id,
             email: req.email,
-            subscription_title: None, // 将在首次获取使用额度时自动更新
+            subscription_title: None,
             proxy_url: req.proxy_url,
             proxy_username: req.proxy_username,
             proxy_password: req.proxy_password,
-            disabled: false, // 新添加的凭据默认启用
+            disabled: false,
             kiro_api_key: req.kiro_api_key,
             endpoint: req.endpoint,
+            password: req.password,
+            web_access_token: req.web_access_token,
+            web_session_token: req.web_session_token,
+            web_user_id: req.web_user_id,
         };
 
         // 调用 token_manager 添加凭据
