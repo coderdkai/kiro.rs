@@ -168,6 +168,47 @@ pub struct AddCredentialResponse {
     pub email: Option<String>,
 }
 
+// ============ Web Session 导出 ============
+
+/// Web Session 导出响应 (agent-browser state 格式)
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSessionExportResponse {
+    pub total: usize,
+    pub sessions: Vec<WebSessionItem>,
+}
+
+/// 单个用户的 Web Session
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSessionItem {
+    pub id: u64,
+    pub email: Option<String>,
+    pub user_id: String,
+    pub state: WebSessionState,
+}
+
+/// agent-browser 兼容的 state 格式
+#[derive(Debug, Serialize)]
+pub struct WebSessionState {
+    pub cookies: Vec<WebSessionCookie>,
+    pub origins: Vec<serde_json::Value>,
+}
+
+/// Cookie 条目
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebSessionCookie {
+    pub name: String,
+    pub value: String,
+    pub domain: String,
+    pub path: String,
+    pub http_only: bool,
+    pub secure: bool,
+    pub same_site: String,
+    pub expires: f64,
+}
+
 // ============ 余额查询 ============
 
 /// 余额查询响应

@@ -64,45 +64,88 @@ Kiro /signin
 
 `kiro_register.py` `###RESULT###` JSON 中的字段与 Kiro Web cookie 的对应关系:
 
-| 脚本输出字段 | → | Web Cookie | 说明 |
-|-------------|---|------------|------|
-| `accessToken` | → | `AccessToken` | Kiro Web 访问令牌 |
-| `sessionToken` | → | `SessionToken` | SSO Bearer Token |
-| N/A | → | `Idp` | 固定值 "BuilderId" |
-| N/A | → | `UserId` | 需从 whoAmI 或 token 解码获取 |
-| `password` | → | N/A | 明文密码 (用于浏览器重新登录) |
-| `clientId` | → | N/A | OIDC Client ID (API 网关用) |
-| `clientSecret` | → | N/A | OIDC Client Secret (API 网关用) |
-| `refreshToken` | → | N/A | OIDC Refresh Token (API 网关用) |
+| 脚本输出字段 | → | Web Cookie | 来源 | 说明 |
+|-------------|---|------------|------|------|
+| `accessToken` | → | `AccessToken` | **Set-Cookie 优先**, CBOR body 备选 | Kiro Web 访问令牌 |
+| `sessionToken` | → | `SessionToken` | **Set-Cookie 优先**, bearer_token 备选 | SSO Bearer Token (JWE) |
+| `userId` | → | `UserId` | **Set-Cookie** | 用户标识 `d-9067642ac7.<uuid>` |
+| N/A | → | `Idp` | 固定值 | 固定值 "BuilderId" |
+| `password` | → | N/A | 注册脚本 | 明文密码 (用于浏览器重新登录) |
+| `clientId` | → | N/A | device auth 流程 | OIDC Client ID (反代用) |
+| `clientSecret` | → | N/A | device auth 流程 | OIDC Client Secret (反代用) |
+| `refreshToken` | → | N/A | device auth 流程 | OIDC Refresh Token (反代用) |
 
-## 5. 实施建议
+> **重要**: ExchangeToken 端点的 CBOR body 中的 `accessToken` 值可能与 Set-Cookie 头中的 `AccessToken` 不同。
+> Python 脚本优先从 `r.cookies` (Set-Cookie) 提取，确保存储的是浏览器实际使用的 cookie 值。
 
-### 数据库新增字段
+## 5. 已实施的功能
 
-在 `credentials` 表中添加:
+### 数据库字段 (已完成)
+
+`credentials` 表新增字段:
 - `password TEXT` - 明文密码 (用于浏览器登录)
 - `web_access_token TEXT` - Kiro Web AccessToken cookie 值
 - `web_session_token TEXT` - Kiro Web SessionToken cookie 值
 - `web_user_id TEXT` - Kiro Web UserId cookie 值
 
-### 注册时保存
+### 自动注册入库 (已完成)
 
-在 `auto_register.rs` 中，从 Python 脚本的 `###RESULT###` JSON 提取并保存:
+`auto_register.rs` 从 Python 脚本的 `###RESULT###` JSON 提取并保存:
 - `password` → `credentials.password`
-- `accessToken` → `credentials.web_access_token`
-- `sessionToken` → `credentials.web_session_token`
+- `accessToken` → `credentials.web_access_token` (Set-Cookie 优先)
+- `sessionToken` → `credentials.web_session_token` (Set-Cookie 优先)
+- `userId` → `credentials.web_user_id` (Set-Cookie)
 
-### 用户切换 API (未来)
+## 6. Cookie 注入恢复用户状态
 
-可提供 Admin API 端点:
+### State 文件格式
+
+agent-browser 兼容的 state JSON，cookie 必须包含 `expires` 字段：
+
+```json
+{
+  "cookies": [
+    {"name": "AccessToken", "value": "...", "domain": ".app.kiro.dev", "path": "/", "httpOnly": true, "secure": true, "sameSite": "Lax", "expires": 1778838400},
+    {"name": "SessionToken", "value": "...", "domain": ".app.kiro.dev", "path": "/", "httpOnly": true, "secure": true, "sameSite": "Lax", "expires": 1778838400},
+    {"name": "Idp", "value": "BuilderId", "domain": ".app.kiro.dev", "path": "/", "httpOnly": true, "secure": true, "sameSite": "Lax", "expires": 1778838400},
+    {"name": "UserId", "value": "d-9067642ac7.xxx", "domain": ".app.kiro.dev", "path": "/", "httpOnly": true, "secure": true, "sameSite": "Lax", "expires": 1778838400}
+  ],
+  "origins": []
+}
 ```
-GET /api/admin/credentials/:id/web-session
-→ 返回 agent-browser 兼容的 state JSON
+
+> **关键**: `expires` 字段必须存在，否则 cookie 被视为 session cookie，导致注入无效。
+> **关键**: `domain` 使用 `.app.kiro.dev` (带点前缀)。
+
+### 使用 Roxy Browser 恢复 (推荐)
+
+```bash
+# 1. 导出 state 文件
+./scripts/kiro_export_web_state.sh do
+
+# 2. 恢复用户状态 (交互式选择)
+./scripts/kiro_restore_roxy.sh
+
+# 或指定用户 ID
+./scripts/kiro_restore_roxy.sh 18
+
+# 或指定 state 文件
+./scripts/kiro_restore_roxy.sh /tmp/kiro-web-states/kiro_user_18.json
 ```
 
-## 6. 安全注意事项
+### 使用 agent-browser 直接恢复
+
+```bash
+agent-browser --headed batch \
+  "state load /tmp/kiro-web-states/kiro_user_18.json" \
+  "open https://app.kiro.dev" \
+  "wait 5000"
+```
+
+## 7. 安全注意事项
 
 - 所有 web token 均有时效性 (~7天)
 - 明文密码存储需评估安全风险
 - 建议加密存储敏感字段
 - signin.aws 的 `aws-usi-authn` cookie 是 AWS 端的 session，跨用户复用会导致问题
+- State 文件包含明文 token，应添加到 `.gitignore`

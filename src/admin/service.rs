@@ -14,6 +14,7 @@ use crate::kiro::model::credentials::KiroCredentials;
 use crate::kiro::token_manager::MultiTokenManager;
 
 use super::error::AdminServiceError;
+use super::types;
 use super::types::{
     AddCredentialRequest, AddCredentialResponse, BalanceResponse, CredentialStatusItem,
     CredentialsStatusResponse, LoadBalancingModeResponse, SetLoadBalancingModeRequest,
@@ -105,6 +106,87 @@ impl AdminService {
             current_id: snapshot.current_id,
             credentials,
         }
+    }
+
+    /// 导出有 web session 数据的凭据（agent-browser state 格式）
+    pub async fn export_web_sessions(
+        &self,
+    ) -> Result<types::WebSessionExportResponse, AdminServiceError> {
+        let creds = database::credentials::get_all(&self.db_pool)
+            .await
+            .map_err(|e| AdminServiceError::InternalError(format!("数据库查询失败: {}", e)))?;
+
+        let expires = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64())
+            + 7.0 * 24.0 * 3600.0;
+
+        let sessions: Vec<types::WebSessionItem> = creds
+            .into_iter()
+            .filter(|c| {
+                c.web_access_token.is_some()
+                    && c.web_session_token.is_some()
+                    && c.web_user_id.is_some()
+            })
+            .map(|c| {
+                let web_uid = c.web_user_id.clone().unwrap_or_default();
+                let cookies = vec![
+                    types::WebSessionCookie {
+                        name: "AccessToken".into(),
+                        value: c.web_access_token.unwrap_or_default(),
+                        domain: ".app.kiro.dev".into(),
+                        path: "/".into(),
+                        http_only: true,
+                        secure: true,
+                        same_site: "Lax".into(),
+                        expires,
+                    },
+                    types::WebSessionCookie {
+                        name: "SessionToken".into(),
+                        value: c.web_session_token.unwrap_or_default(),
+                        domain: ".app.kiro.dev".into(),
+                        path: "/".into(),
+                        http_only: true,
+                        secure: true,
+                        same_site: "Lax".into(),
+                        expires,
+                    },
+                    types::WebSessionCookie {
+                        name: "Idp".into(),
+                        value: "BuilderId".into(),
+                        domain: ".app.kiro.dev".into(),
+                        path: "/".into(),
+                        http_only: true,
+                        secure: true,
+                        same_site: "Lax".into(),
+                        expires,
+                    },
+                    types::WebSessionCookie {
+                        name: "UserId".into(),
+                        value: web_uid.clone(),
+                        domain: ".app.kiro.dev".into(),
+                        path: "/".into(),
+                        http_only: true,
+                        secure: true,
+                        same_site: "Lax".into(),
+                        expires,
+                    },
+                ];
+                types::WebSessionItem {
+                    id: c.id.unwrap_or(0),
+                    email: c.email,
+                    user_id: web_uid,
+                    state: types::WebSessionState {
+                        cookies,
+                        origins: vec![],
+                    },
+                }
+            })
+            .collect();
+
+        let total = sessions.len();
+        Ok(types::WebSessionExportResponse { total, sessions })
     }
 
     /// 设置凭据禁用状态
