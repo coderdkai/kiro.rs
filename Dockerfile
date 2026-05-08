@@ -7,7 +7,7 @@ COPY admin-ui ./
 RUN pnpm build
 
 FROM rust:1.92-alpine AS chef
-RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static && \
+RUN apk add --no-cache musl-dev perl make && \
     cargo install cargo-chef --locked
 WORKDIR /app
 
@@ -20,13 +20,13 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 ENV CARGO_PROFILE_RELEASE_LTO=off
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
+RUN cargo chef cook --release --no-default-features --recipe-path recipe.json
 
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migrations ./migrations
 COPY --from=frontend-builder /app/admin-ui/dist /app/admin-ui/dist
-RUN cargo build --release
+RUN cargo build --release --no-default-features
 
 FROM alpine:3.21
 
