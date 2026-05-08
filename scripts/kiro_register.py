@@ -1282,6 +1282,7 @@ class KiroRegister:
         return {
             "accessToken": access_token,
             "sessionToken": session_token,
+            "bearerToken": bearer_token,
             "csrfToken": kiro_csrf,
             "expiresIn": expires_in,
             "userId": user_id,
@@ -1929,7 +1930,7 @@ def main():
             reg.log("🎉 注册完成! (但 token 获取失败, 账号可用)")
             result = {"email": email_addr, "password": use_password, "name": name}
         else:
-            bearer_token = tokens["sessionToken"]
+            bearer_token = tokens.get("bearerToken") or tokens["sessionToken"]
             device_tokens = reg.step12f_device_auth(bearer_token)
             if device_tokens:
                 reg.log("🎉 注册完成! (含 accessToken + sessionToken + refreshToken)")
