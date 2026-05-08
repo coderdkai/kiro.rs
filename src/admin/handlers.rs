@@ -83,6 +83,15 @@ pub async fn get_credential_balance(
     }
 }
 
+/// GET /api/admin/web-sessions
+/// 导出所有有 web session 的凭据 (agent-browser state 格式)
+pub async fn export_web_sessions(State(state): State<AdminState>) -> impl IntoResponse {
+    match state.service.export_web_sessions().await {
+        Ok(response) => Json(response).into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
+
 /// POST /api/admin/credentials
 /// 添加新凭据
 pub async fn add_credential(
