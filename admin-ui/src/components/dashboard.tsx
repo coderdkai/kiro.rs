@@ -371,21 +371,23 @@ export function Dashboard({ onLogout }: DashboardProps) {
     deselectAll()
   }
 
-  // 查询当前页凭据信息（逐个查询，避免瞬时并发）
-  const handleQueryCurrentPageInfo = async () => {
-    if (currentCredentials.length === 0) {
-      toast.error('当前页没有可查询的凭据')
+  // 查询已选中凭据信息（逐个查询，避免瞬时并发）
+  const handleQuerySelectedInfo = async () => {
+    if (selectedIds.size === 0) {
+      toast.error('请先选择要查询的凭据')
       return
     }
 
-    const ids = currentCredentials
-      .filter(credential => !credential.disabled)
-      .map(credential => credential.id)
+    const selectedCredentials = Array.from(selectedIds)
+      .map(id => data?.credentials.find(c => c.id === id))
+      .filter((c): c is NonNullable<typeof c> => c != null && !c.disabled)
 
-    if (ids.length === 0) {
-      toast.error('当前页没有可查询的启用凭据')
+    if (selectedCredentials.length === 0) {
+      toast.error('选中的凭据中没有可查询的启用凭据')
       return
     }
+
+    const ids = selectedCredentials.map(c => c.id)
 
     setQueryingInfo(true)
     setQueryInfoProgress({ current: 0, total: ids.length })
@@ -660,7 +662,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
         {/* 凭据列表 */}
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex flex-col gap-3">
+            {/* 第一行：标题 + 选择状态 */}
             <div className="flex items-center gap-4">
               <h2 className="text-xl font-semibold">凭据管理</h2>
               {selectedIds.size > 0 && (
@@ -672,9 +675,15 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 </div>
               )}
             </div>
+
+            {/* 第二行：操作按钮 */}
             <div className="flex flex-wrap gap-2">
               {selectedIds.size > 0 && (
                 <>
+                  <Button onClick={handleQuerySelectedInfo} size="sm" variant="outline" disabled={queryingInfo}>
+                    <RefreshCw className={`h-4 w-4 mr-2 ${queryingInfo ? 'animate-spin' : ''}`} />
+                    {queryingInfo ? `查询中... ${queryInfoProgress.current}/${queryInfoProgress.total}` : '查询信息'}
+                  </Button>
                   <Button onClick={handleBatchVerify} size="sm" variant="outline">
                     <CheckCircle2 className="h-4 w-4 mr-2" />
                     批量验活
@@ -708,17 +717,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
                 <Button onClick={() => setVerifyDialogOpen(true)} size="sm" variant="secondary">
                   <CheckCircle2 className="h-4 w-4 mr-2 animate-spin" />
                   验活中... {verifyProgress.current}/{verifyProgress.total}
-                </Button>
-              )}
-              {data?.credentials && data.credentials.length > 0 && (
-                <Button
-                  onClick={handleQueryCurrentPageInfo}
-                  size="sm"
-                  variant="outline"
-                  disabled={queryingInfo}
-                >
-                  <RefreshCw className={`h-4 w-4 mr-2 ${queryingInfo ? 'animate-spin' : ''}`} />
-                  {queryingInfo ? `查询中... ${queryInfoProgress.current}/${queryInfoProgress.total}` : '查询信息'}
                 </Button>
               )}
               {data?.credentials && data.credentials.length > 0 && (
