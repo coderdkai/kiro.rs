@@ -288,6 +288,10 @@ mod tests {
             disabled: false,
             kiro_api_key: None,
             endpoint: None,
+            password: None,
+            web_access_token: None,
+            web_session_token: None,
+            web_user_id: None,
         };
 
         let json = creds.to_pretty_json().unwrap();
@@ -363,6 +367,10 @@ mod tests {
             disabled: false,
             kiro_api_key: None,
             endpoint: None,
+            password: None,
+            web_access_token: None,
+            web_session_token: None,
+            web_user_id: None,
         };
 
         let json = creds.to_pretty_json().unwrap();
@@ -394,6 +402,10 @@ mod tests {
             disabled: false,
             kiro_api_key: None,
             endpoint: None,
+            password: None,
+            web_access_token: None,
+            web_session_token: None,
+            web_user_id: None,
         };
 
         let json = creds.to_pretty_json().unwrap();
@@ -491,6 +503,10 @@ mod tests {
             disabled: false,
             kiro_api_key: None,
             endpoint: None,
+            password: None,
+            web_access_token: None,
+            web_session_token: None,
+            web_user_id: None,
         };
 
         let json = original.to_pretty_json().unwrap();
