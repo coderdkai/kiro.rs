@@ -2,13 +2,11 @@
 /CLAUDE.md
 /AGENTS.md
 /config.json
-/credentials.json
 /.idea
 /test.json
 /admin-ui/node_modules/
 /admin-ui/dist/
 /admin-ui/tsconfig.tsbuildinfo
-/credentials.*
 *.db
 *.db-wal
 *.db-shm

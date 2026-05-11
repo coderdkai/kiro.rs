@@ -37,7 +37,7 @@
 - **多凭据支持**: 支持配置多个凭据，按优先级自动故障转移
 - **负载均衡**: 支持 `priority`（按优先级）和 `balanced`（均衡分配）两种模式
 - **智能重试**: 单凭据最多重试 3 次，单请求最多重试 9 次
-- **凭据回写**: 多凭据格式下自动回写刷新后的 Token
+- **凭据回写**: Token 刷新后自动回写到 SQLite 数据库
 - **Thinking 模式**: 支持 Claude 的 extended thinking 功能
 - **工具调用**: 完整支持 function calling / tool use
 - **WebSearch**: 内置 WebSearch 工具转换逻辑
@@ -56,7 +56,6 @@
   - [Docker](#docker)
 - [配置详解](#配置详解)
   - [config.json](#configjson)
-  - [credentials.json](#credentialsjson)
   - [Region 配置](#region-配置)
   - [代理配置](#代理配置)
   - [认证方式](#认证方式)
@@ -103,29 +102,7 @@ cargo build --release
 ```
 > PS: 如果你需要 Web 管理面板, 请注意配置 `adminApiKey`
 
-创建 `credentials.json`（从 Kiro IDE 等中获取凭证信息）：
-> PS: 可以前往 Web 管理面板配置跳过本步骤
-> 如果你对凭据地域有疑惑, 请查看 [Region 配置](#region-配置)
-
-Social 认证：
-```json
-{
-   "refreshToken": "你的刷新token",
-   "expiresAt": "2025-12-31T02:32:45.144Z",
-   "authMethod": "social"
-}
-```
-
-IdC 认证：
-```json
-{
-   "refreshToken": "你的刷新token",
-   "expiresAt": "2025-12-31T02:32:45.144Z",
-   "authMethod": "idc",
-   "clientId": "你的clientId",
-   "clientSecret": "你的clientSecret"
-}
-```
+凭据通过 Admin Web 管理面板（`/admin`）添加和管理，无需手动创建配置文件。也可通过 Admin API 或 `KIRO_API_KEY` 环境变量注入。
 
 ### 3. 启动
 
@@ -136,7 +113,7 @@ IdC 认证：
 或指定配置文件路径：
 
 ```bash
-./target/release/kiro-rs -c /path/to/config.json --credentials /path/to/credentials.json
+./target/release/kiro-rs -c /path/to/config.json
 ```
 
 ### 4. 验证
@@ -163,7 +140,7 @@ curl http://127.0.0.1:8990/v1/messages \
 docker-compose up
 ```
 
-需要将 `config.json` 和 `credentials.json` 挂载到容器中，具体参见 `docker-compose.yml`。
+需要将 `config.json` 挂载到容器中，具体参见 `docker-compose.yml`。凭据通过 Admin Web 管理面板管理。
 
 ## 配置详解
 
@@ -220,15 +197,15 @@ docker-compose up
 }
 ```
 
-### credentials.json
+### 凭据字段说明
 
-支持单对象格式（向后兼容）或数组格式（多凭据）。
+凭据通过 Admin API 或 Web 管理面板管理，存储在 SQLite 数据库中。
 
 #### 字段说明
 
 | 字段             | 类型     | 描述                                          |
 |----------------|--------|---------------------------------------------|
-| `id`           | number | 凭据唯一 ID（可选，仅用于 Admin API 管理；手写文件可不填）        |
+| `id`           | number | 凭据唯一 ID（自动生成）        |
 | `accessToken`  | string | OAuth 访问令牌（可选，可自动刷新）                        |
 | `refreshToken` | string | OAuth 刷新令牌                                  |
 | `profileArn`   | string | AWS Profile ARN（可选，登录时返回）                   |
@@ -237,7 +214,6 @@ docker-compose up
 | `clientId`     | string | IdC 登录的客户端 ID（IdC 认证必填）                     |
 | `clientSecret` | string | IdC 登录的客户端密钥（IdC 认证必填）                      |
 | `priority`     | number | 凭据优先级，数字越小越优先，默认为 0                         |
-| `region`       | string | 凭据级 Auth Region, 兼容字段                       |
 | `authRegion`   | string | 凭据级 Auth Region，用于 Token 刷新, 未配置时回退到 region |
 | `apiRegion`    | string | 凭据级 API Region，用于 API 请求                    |
 | `machineId`    | string | 凭据级机器码（64位十六进制）                             |
@@ -249,59 +225,12 @@ docker-compose up
 
 说明：
 - IdC / Builder-ID / IAM 在本项目里属于同一种登录方式，配置时统一使用 `authMethod: "idc"`
-- 为兼容旧配置，`builder-id` / `iam` 仍可被识别，但会按 `idc` 处理
-
-#### 单凭据格式（旧格式，向后兼容）
-
-```json
-{
-   "accessToken": "请求token，一般有效期一小时，可选",
-   "refreshToken": "刷新token，一般有效期7-30天不等",
-   "profileArn": "arn:aws:codewhisperer:us-east-1:111112222233:profile/QWER1QAZSDFGH",
-   "expiresAt": "2025-12-31T02:32:45.144Z",
-   "authMethod": "social",
-   "clientId": "IdC 登录需要",
-   "clientSecret": "IdC 登录需要"
-}
-```
-
-#### 多凭据格式（支持故障转移和自动回写）
-
-```json
-[
-   {
-      "refreshToken": "第一个凭据的刷新token",
-      "expiresAt": "2025-12-31T02:32:45.144Z",
-      "authMethod": "social",
-      "priority": 0
-   },
-   {
-      "refreshToken": "第二个凭据的刷新token",
-      "expiresAt": "2025-12-31T02:32:45.144Z",
-      "authMethod": "idc",
-      "clientId": "xxxxxxxxx",
-      "clientSecret": "xxxxxxxxx",
-      "region": "us-east-2",
-      "priority": 1,
-      "proxyUrl": "socks5://proxy.example.com:1080",
-      "proxyUsername": "user",
-      "proxyPassword": "pass"
-   },
-   {
-      "refreshToken": "第三个凭据（显式不走代理）",
-      "expiresAt": "2025-12-31T02:32:45.144Z",
-      "authMethod": "social",
-      "priority": 2,
-      "proxyUrl": "direct"
-   }
-]
-```
 
 多凭据特性：
 - 按 `priority` 字段排序，数字越小优先级越高（默认为 0）
 - 单凭据最多重试 3 次，单请求最多重试 9 次
 - 自动故障转移到下一个可用凭据
-- 多凭据格式下 Token 刷新后自动回写到源文件
+- Token 刷新后自动回写到 SQLite 数据库
 
 ### Region 配置
 
@@ -460,7 +389,7 @@ RUST_LOG=debug ./target/release/kiro-rs
 
 ## 注意事项
 
-1. **凭证安全**: 请妥善保管 `credentials.json` 文件，不要提交到版本控制
+1. **凭证安全**: 凭据存储在 SQLite 数据库中，请妥善保管数据库文件，不要提交到版本控制
 2. **Token 刷新**: 服务会自动刷新过期的 Token，无需手动干预
 3. **WebSearch 工具**: 当 `tools` 列表仅包含一个 `web_search` 工具时，会走内置 WebSearch 转换逻辑
 

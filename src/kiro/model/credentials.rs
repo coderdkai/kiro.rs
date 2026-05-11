@@ -328,8 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn test_region_field_missing_backward_compat() {
-        // 测试向后兼容：不包含 region 字段的旧格式 JSON
+    fn test_region_field_default_none() {
         let json = r#"{
             "refreshToken": "test_refresh",
             "authMethod": "social"
@@ -572,8 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn test_backward_compat_no_auth_api_region() {
-        // 旧格式 JSON 不包含 authRegion/apiRegion，应正常解析
+    fn test_auth_api_region_default_none() {
         let json = r#"{
             "refreshToken": "test_refresh",
             "region": "us-east-1"

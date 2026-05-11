@@ -30,7 +30,6 @@ AGENTS.md
 *.md
 README.md
 config.example.json
-credentials.example.*.json
 
 # Development and test files
 src/test.rs
@@ -44,7 +43,6 @@ Thumbs.db
 
 # Local configuration (keep templates only)
 config.json
-credentials.json
 *.db
 *.db-wal
 *.db-shm
