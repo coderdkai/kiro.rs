@@ -12,7 +12,7 @@ import { DeviceLoginDialog } from '@/components/device-login-dialog'
 import { AutoRegisterDialog } from '@/components/auto-register-dialog'
 import { BatchVerifyDialog, type VerifyResult } from '@/components/batch-verify-dialog'
 import { useCredentials, useDeleteCredential, useResetFailure, useLoadBalancingMode, useSetLoadBalancingMode } from '@/hooks/use-credentials'
-import { getCredentialBalance, forceRefreshToken } from '@/api/credentials'
+import { getCredentialBalance, forceRefreshToken, verifyCredential } from '@/api/credentials'
 import { extractErrorMessage } from '@/lib/utils'
 import type { BalanceResponse } from '@/types/api'
 
@@ -494,11 +494,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
       })
 
       try {
-        const balance = await getCredentialBalance(id)
+        await verifyCredential(id)
         successCount++
-
-        // 保存到 localStorage 和内存
-        storage.setBalanceCache(id, balance)
 
         // 更新为成功状态
         setVerifyResults(prev => {
@@ -506,7 +503,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           newResults.set(id, {
             id,
             status: 'success',
-            usage: `${balance.currentUsage}/${balance.usageLimit}`
+            usage: '请求成功'
           })
           return newResults
         })

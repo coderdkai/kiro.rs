@@ -15,6 +15,7 @@ use crate::http_client::{ProxyConfig, build_client};
 use crate::kiro::endpoint::{KiroEndpoint, RequestContext};
 use crate::kiro::machine_id;
 use crate::kiro::model::credentials::KiroCredentials;
+use crate::kiro::parser::decoder::EventStreamDecoder;
 use crate::kiro::token_manager::MultiTokenManager;
 use crate::model::config::TlsBackend;
 use parking_lot::Mutex;
@@ -45,6 +46,19 @@ pub struct KiroProvider {
     default_endpoint: String,
 }
 
+impl Clone for KiroProvider {
+    fn clone(&self) -> Self {
+        Self {
+            token_manager: self.token_manager.clone(),
+            global_proxy: self.global_proxy.clone(),
+            client_cache: Mutex::new(self.client_cache.lock().clone()),
+            tls_backend: self.tls_backend,
+            endpoints: self.endpoints.clone(),
+            default_endpoint: self.default_endpoint.clone(),
+        }
+    }
+}
+
 impl KiroProvider {
     /// 创建带代理配置和端点注册表的 KiroProvider 实例
     ///
@@ -66,8 +80,8 @@ impl KiroProvider {
         );
         let tls_backend = token_manager.config().tls_backend;
         // 预热：构建全局代理对应的 Client
-        let initial_client = build_client(proxy.as_ref(), 720, tls_backend)
-            .expect("创建 HTTP 客户端失败");
+        let initial_client =
+            build_client(proxy.as_ref(), 720, tls_backend).expect("创建 HTTP 客户端失败");
         let mut cache = HashMap::new();
         cache.insert(proxy.clone(), initial_client);
 
@@ -94,10 +108,7 @@ impl KiroProvider {
     }
 
     /// 根据凭据选择 endpoint 实现
-    fn endpoint_for(
-        &self,
-        credentials: &KiroCredentials,
-    ) -> anyhow::Result<Arc<dyn KiroEndpoint>> {
+    fn endpoint_for(&self, credentials: &KiroCredentials) -> anyhow::Result<Arc<dyn KiroEndpoint>> {
         let name = credentials
             .endpoint
             .as_deref()
@@ -118,6 +129,80 @@ impl KiroProvider {
     /// 发送流式 API 请求
     pub async fn call_api_stream(&self, request_body: &str) -> anyhow::Result<reqwest::Response> {
         self.call_api_with_retry(request_body, true).await
+    }
+
+    /// 使用指定凭据发送一次实际模型请求，用于 Admin 验活。
+    ///
+    /// 与常规 `call_api` 不同，此方法固定使用传入的凭据 ID，不做负载均衡切换；
+    /// 请求成功且响应流中没有 error/exception 事件即视为验活成功。
+    pub async fn verify_credential_with_request(
+        &self,
+        id: u64,
+        request_body: &str,
+    ) -> anyhow::Result<()> {
+        let ctx = self.token_manager.acquire_context_for_id(id).await?;
+        let config = self.token_manager.config();
+        let machine_id = machine_id::generate_from_credentials(&ctx.credentials, config);
+        let endpoint = self.endpoint_for(&ctx.credentials)?;
+
+        let rctx = RequestContext {
+            credentials: &ctx.credentials,
+            token: &ctx.token,
+            machine_id: &machine_id,
+            config,
+        };
+
+        let url = endpoint.api_url(&rctx);
+        let body = endpoint.transform_api_body(request_body, &rctx);
+        let base = self
+            .client_for(&ctx.credentials)?
+            .post(&url)
+            .body(body)
+            .header("content-type", "application/json")
+            .header("Connection", "close");
+        let request = endpoint.decorate_api(base, &rctx);
+        let response = request.send().await?;
+        let status = response.status();
+
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            if status.as_u16() == 402 && endpoint.is_monthly_request_limit(&body) {
+                self.token_manager.report_quota_exhausted(ctx.id);
+            } else if matches!(status.as_u16(), 401 | 403) || status.as_u16() == 429 {
+                self.token_manager.report_failure(ctx.id);
+            }
+            anyhow::bail!("验活请求失败: {} {}", status, body);
+        }
+
+        let mut decoder = EventStreamDecoder::new();
+        let bytes = response.bytes().await?;
+        decoder.feed(&bytes)?;
+        for event in decoder.decode_iter() {
+            match event.and_then(crate::kiro::model::events::Event::from_frame) {
+                Ok(crate::kiro::model::events::Event::Error {
+                    error_code,
+                    error_message,
+                }) => {
+                    self.token_manager.report_failure(ctx.id);
+                    anyhow::bail!("验活响应错误: {} {}", error_code, error_message);
+                }
+                Ok(crate::kiro::model::events::Event::Exception {
+                    exception_type,
+                    message,
+                }) => {
+                    self.token_manager.report_failure(ctx.id);
+                    anyhow::bail!("验活响应异常: {} {}", exception_type, message);
+                }
+                Err(e) => {
+                    self.token_manager.report_failure(ctx.id);
+                    anyhow::bail!("验活响应解析失败: {}", e);
+                }
+                _ => {}
+            }
+        }
+
+        self.token_manager.report_success(ctx.id);
+        Ok(())
     }
 
     /// 发送 MCP API 请求（WebSearch 等工具调用）
@@ -222,7 +307,12 @@ impl KiroProvider {
                 if endpoint.is_bearer_token_invalid(&body) && !force_refreshed.contains(&ctx.id) {
                     force_refreshed.insert(ctx.id);
                     tracing::info!("凭据 #{} token 疑似被上游失效，尝试强制刷新", ctx.id);
-                    if self.token_manager.force_refresh_token_for(ctx.id).await.is_ok() {
+                    if self
+                        .token_manager
+                        .force_refresh_token_for(ctx.id)
+                        .await
+                        .is_ok()
+                    {
                         tracing::info!("凭据 #{} token 强制刷新成功，重试请求", ctx.id);
                         continue;
                     }
@@ -248,11 +338,7 @@ impl KiroProvider {
                 );
                 let has_available = self.token_manager.report_failure(ctx.id);
                 if !has_available {
-                    anyhow::bail!(
-                        "MCP 请求失败（所有凭据已被风控封禁）: {} {}",
-                        status,
-                        body
-                    );
+                    anyhow::bail!("MCP 请求失败（所有凭据已被风控封禁）: {} {}", status, body);
                 }
                 last_error = Some(anyhow::anyhow!("MCP 请求失败: {} {}", status, body));
                 continue;
@@ -449,7 +535,12 @@ impl KiroProvider {
                 if endpoint.is_bearer_token_invalid(&body) && !force_refreshed.contains(&ctx.id) {
                     force_refreshed.insert(ctx.id);
                     tracing::info!("凭据 #{} token 疑似被上游失效，尝试强制刷新", ctx.id);
-                    if self.token_manager.force_refresh_token_for(ctx.id).await.is_ok() {
+                    if self
+                        .token_manager
+                        .force_refresh_token_for(ctx.id)
+                        .await
+                        .is_ok()
+                    {
                         tracing::info!("凭据 #{} token 强制刷新成功，重试请求", ctx.id);
                         continue;
                     }

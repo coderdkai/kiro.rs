@@ -132,6 +132,18 @@ pub async fn force_refresh_token(
     }
 }
 
+/// POST /api/admin/credentials/:id/verify
+/// 使用真实模型请求验活指定凭据
+pub async fn verify_credential(
+    State(state): State<AdminState>,
+    Path(id): Path<u64>,
+) -> impl IntoResponse {
+    match state.service.verify_credential(id).await {
+        Ok(_) => Json(SuccessResponse::new(format!("凭据 #{} 验活成功", id))).into_response(),
+        Err(e) => (e.status_code(), Json(e.into_response())).into_response(),
+    }
+}
+
 /// GET /api/admin/config/load-balancing
 /// 获取负载均衡模式
 pub async fn get_load_balancing_mode(State(state): State<AdminState>) -> impl IntoResponse {
@@ -232,7 +244,11 @@ pub async fn device_flow_poll(
 ) -> impl IntoResponse {
     match state
         .service
-        .device_flow_poll(payload.client_id, payload.client_secret, payload.device_code)
+        .device_flow_poll(
+            payload.client_id,
+            payload.client_secret,
+            payload.device_code,
+        )
         .await
     {
         Ok(response) => Json(response).into_response(),

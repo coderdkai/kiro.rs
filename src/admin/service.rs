@@ -11,6 +11,11 @@ use sqlx::SqlitePool;
 
 use crate::kiro::database;
 use crate::kiro::model::credentials::KiroCredentials;
+use crate::kiro::model::requests::conversation::{
+    ConversationState, CurrentMessage, UserInputMessage,
+};
+use crate::kiro::model::requests::kiro::KiroRequest;
+use crate::kiro::provider::KiroProvider;
 use crate::kiro::token_manager::MultiTokenManager;
 
 use super::error::AdminServiceError;
@@ -37,6 +42,7 @@ struct CachedBalance {
 /// 封装所有 Admin API 的业务逻辑
 pub struct AdminService {
     pub(crate) token_manager: Arc<MultiTokenManager>,
+    kiro_provider: Arc<KiroProvider>,
     balance_cache: Mutex<HashMap<u64, CachedBalance>>,
     cache_path: Option<PathBuf>,
     /// 已注册的端点名称集合（用于 add_credential 校验）
@@ -48,6 +54,7 @@ pub struct AdminService {
 impl AdminService {
     pub fn new(
         token_manager: Arc<MultiTokenManager>,
+        kiro_provider: Arc<KiroProvider>,
         known_endpoints: impl IntoIterator<Item = String>,
         db_pool: SqlitePool,
     ) -> Self {
@@ -59,6 +66,7 @@ impl AdminService {
 
         Self {
             token_manager,
+            kiro_provider,
             balance_cache: Mutex::new(balance_cache),
             cache_path,
             known_endpoints: known_endpoints.into_iter().collect(),
@@ -218,6 +226,28 @@ impl AdminService {
         self.token_manager
             .reset_and_enable(id)
             .map_err(|e| self.classify_error(e, id))
+    }
+
+    /// 使用 Claude Haiku 4.5 发起一次真实模型请求验活。
+    pub async fn verify_credential(&self, id: u64) -> Result<(), AdminServiceError> {
+        let request = KiroRequest {
+            conversation_state: ConversationState::new(uuid::Uuid::new_v4().to_string())
+                .with_agent_continuation_id(uuid::Uuid::new_v4().to_string())
+                .with_agent_task_type("vibe")
+                .with_chat_trigger_type("MANUAL")
+                .with_current_message(CurrentMessage::new(UserInputMessage::new(
+                    "ping",
+                    "claude-haiku-4.5",
+                ))),
+            profile_arn: None,
+        };
+        let body = serde_json::to_string(&request)
+            .map_err(|e| AdminServiceError::InternalError(e.to_string()))?;
+
+        self.kiro_provider
+            .verify_credential_with_request(id, &body)
+            .await
+            .map_err(|e| self.classify_balance_error(e, id))
     }
 
     /// 获取凭据余额（带缓存）
@@ -567,7 +597,8 @@ impl AdminService {
         let msg = e.to_string();
         if msg.contains("不存在") {
             AdminServiceError::NotFound { id }
-        } else if msg.contains("只能删除已禁用的凭据") || msg.contains("请先禁用凭据") {
+        } else if msg.contains("只能删除已禁用的凭据") || msg.contains("请先禁用凭据")
+        {
             AdminServiceError::InvalidCredential(msg)
         } else {
             AdminServiceError::InternalError(msg)

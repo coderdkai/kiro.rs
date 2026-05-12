@@ -42,21 +42,27 @@ async fn main() {
 
     // 初始化数据库
     let db_path = std::path::Path::new(&config.database.path);
-    let db_pool = kiro::database::init_pool(db_path).await.unwrap_or_else(|e| {
-        tracing::error!("初始化数据库失败: {}", e);
-        std::process::exit(1);
-    });
+    let db_pool = kiro::database::init_pool(db_path)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!("初始化数据库失败: {}", e);
+            std::process::exit(1);
+        });
 
-    kiro::database::run_migrations(&db_pool).await.unwrap_or_else(|e| {
-        tracing::error!("运行数据库迁移失败: {:#}", e);
-        std::process::exit(1);
-    });
+    kiro::database::run_migrations(&db_pool)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!("运行数据库迁移失败: {:#}", e);
+            std::process::exit(1);
+        });
 
     // 从数据库读取凭据
-    let mut credentials_list = kiro::database::credentials::get_all(&db_pool).await.unwrap_or_else(|e| {
-        tracing::error!("从数据库加载凭据失败: {}", e);
-        std::process::exit(1);
-    });
+    let mut credentials_list = kiro::database::credentials::get_all(&db_pool)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!("从数据库加载凭据失败: {}", e);
+            std::process::exit(1);
+        });
 
     // 检查 KIRO_API_KEY 环境变量，自动创建 API Key 凭据
     if let Ok(kiro_api_key) = std::env::var("KIRO_API_KEY") {
@@ -114,10 +120,7 @@ async fn main() {
 
     // 校验所有凭据声明的端点都已注册
     for cred in &credentials_list {
-        let name = cred
-            .endpoint
-            .as_deref()
-            .unwrap_or(&config.default_endpoint);
+        let name = cred.endpoint.as_deref().unwrap_or(&config.default_endpoint);
         if !endpoints.contains_key(name) {
             tracing::error!(
                 "凭据 id={:?} 指定了未知端点 \"{}\"（已注册: {:?}）",
@@ -162,7 +165,7 @@ async fn main() {
     // 构建 Anthropic API 路由（profile_arn 由 provider 层根据实际凭据动态注入）
     let anthropic_app = anthropic::create_router_with_provider(
         &api_key,
-        Some(kiro_provider),
+        Some(kiro_provider.clone()),
         config.extract_thinking,
     );
 
@@ -179,8 +182,12 @@ async fn main() {
             tracing::warn!("admin_api_key 配置为空，Admin API 未启用");
             anthropic_app
         } else {
-            let admin_service =
-                admin::AdminService::new(token_manager.clone(), endpoint_names.clone(), db_pool.clone());
+            let admin_service = admin::AdminService::new(
+                token_manager.clone(),
+                Arc::new(kiro_provider.clone()),
+                endpoint_names.clone(),
+                db_pool.clone(),
+            );
             let admin_state = admin::AdminState::new(admin_key, admin_service);
             let admin_app = admin::create_admin_router(admin_state);
 
