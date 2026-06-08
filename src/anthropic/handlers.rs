@@ -147,7 +147,7 @@ pub async fn get_models() -> impl IntoResponse {
             max_tokens: 64000,
         },
         Model {
-            id: "claude-opus-4-5-20251101".to_string(),
+            id: "claude-opus-4-5".to_string(),
             object: "model".to_string(),
             created: 1763942400, // Nov 24, 2025
             owned_by: "anthropic".to_string(),
@@ -156,7 +156,7 @@ pub async fn get_models() -> impl IntoResponse {
             max_tokens: 64000,
         },
         Model {
-            id: "claude-opus-4-5-20251101-thinking".to_string(),
+            id: "claude-opus-4-5-thinking".to_string(),
             object: "model".to_string(),
             created: 1763942400, // Nov 24, 2025
             owned_by: "anthropic".to_string(),
@@ -165,7 +165,7 @@ pub async fn get_models() -> impl IntoResponse {
             max_tokens: 64000,
         },
         Model {
-            id: "claude-sonnet-4-5-20250929".to_string(),
+            id: "claude-sonnet-4-5".to_string(),
             object: "model".to_string(),
             created: 1759104000, // Sep 29, 2025
             owned_by: "anthropic".to_string(),
@@ -174,7 +174,7 @@ pub async fn get_models() -> impl IntoResponse {
             max_tokens: 64000,
         },
         Model {
-            id: "claude-sonnet-4-5-20250929-thinking".to_string(),
+            id: "claude-sonnet-4-5-thinking".to_string(),
             object: "model".to_string(),
             created: 1759104000, // Sep 29, 2025
             owned_by: "anthropic".to_string(),
@@ -183,7 +183,7 @@ pub async fn get_models() -> impl IntoResponse {
             max_tokens: 64000,
         },
         Model {
-            id: "claude-haiku-4-5-20251001".to_string(),
+            id: "claude-haiku-4-5".to_string(),
             object: "model".to_string(),
             created: 1760486400, // Oct 15, 2025
             owned_by: "anthropic".to_string(),
@@ -192,7 +192,7 @@ pub async fn get_models() -> impl IntoResponse {
             max_tokens: 64000,
         },
         Model {
-            id: "claude-haiku-4-5-20251001-thinking".to_string(),
+            id: "claude-haiku-4-5-thinking".to_string(),
             object: "model".to_string(),
             created: 1760486400, // Oct 15, 2025
             owned_by: "anthropic".to_string(),
